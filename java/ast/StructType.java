@@ -30,6 +30,11 @@ public class StructType
    }
 
    @Override
+   public String toLlvmType() {
+      return "%struct." + this.name + "*";
+   }
+
+   @Override
    public boolean equals(Object o) {
       return o instanceof StructType
               && (this.name.equals(((StructType) o).getName()) || NULL.equals(((StructType) o).getName()));

@@ -13,6 +13,11 @@ public class IntType
       return "IntType";
    }
 
+   @Override
+   public String toLlvmType() {
+      return "i64";
+   }
+
    public boolean equals(Object o) {
       return o instanceof IntType;
    }

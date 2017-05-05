@@ -254,6 +254,9 @@ public class TypeChecker {
                                   Map<String, Map<String, Type>> structTable,
                                   Map<String, List<Type>> argTypesByFunName) throws TypeCheckerException {
         Type retType = typeCheck(f.getBody(), symbolTable, structTable, argTypesByFunName);
+        if (f.getRetType() instanceof VoidType && retType instanceof EmptyType) {
+            return new VoidType();
+        }
         if (!f.getRetType().equals(retType)) {
             throw new TypeCheckerException(
                     String.format("Invalid return type: %s\n\tExpected: %s\n\tActual: %s\nAt line %d",

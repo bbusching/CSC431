@@ -12,6 +12,12 @@ public class VoidType
    public String toString() {
       return "VoidType";
    }
+
+   @Override
+   public String toLlvmType() {
+      return TYPE;
+   }
+
    public boolean equals(Object o) {
       return o instanceof VoidType;
    }

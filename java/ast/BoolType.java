@@ -12,6 +12,12 @@ public class BoolType
    public String toString() {
       return "BoolType";
    }
+
+   @Override
+   public String toLlvmType() {
+      return "i1";
+   }
+
    @Override
    public boolean equals(Object o) {
       return o instanceof BoolType;

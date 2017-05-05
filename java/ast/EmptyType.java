@@ -11,4 +11,9 @@ public class EmptyType implements Type {
     public String toTypeString() {
         return TYPE;
     }
+
+    @Override
+    public String toLlvmType() {
+        return TYPE;
+    }
 }
