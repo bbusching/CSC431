@@ -1,15 +1,16 @@
 package cfg.llvm;
 
 import ast.Type;
+import cfg.Value;
 
 /**
  * Created by Brad on 4/20/2017.
  */
 public class LLVMReturn implements LLVMInstruction {
     private Type type;
-    private LLVMRegister reg;
+    private Value reg;
 
-    public LLVMReturn(Type type, LLVMRegister reg) {
+    public LLVMReturn(Type type, Value reg) {
         this.type = type;
         this.reg = reg;
     }

@@ -1,4 +1,5 @@
 import cfg.LLVMEmitter;
+import cfg.LLVMSSAEmitter;
 import org.antlr.v4.runtime.*;
 import org.antlr.v4.runtime.tree.*;
 
@@ -8,6 +9,7 @@ public class MiniCompiler {
 
     private static String _inputFile = null;
     private static boolean llvm = false;
+    private static boolean ssa = false;
 
     public static void main(String[] args) throws TypeChecker.TypeCheckerException {
         parseParameters(args);
@@ -29,7 +31,11 @@ public class MiniCompiler {
                 String filename = _inputFile.lastIndexOf('.') >= 0 ?
                         String.format("%s.ll", _inputFile.substring(0, _inputFile.lastIndexOf('.')))
                         : String.format("%s.ll", _inputFile);
-                LLVMEmitter.writeLlvm(program, filename);
+                if (ssa) {
+                    LLVMSSAEmitter.writeLlvm(program, filename);
+                } else {
+                    LLVMEmitter.writeLlvm(program, filename);
+                }
             }
         }
     }
@@ -39,6 +45,8 @@ public class MiniCompiler {
             if (args[i].charAt(0) == '-') {
                 if ("llvm".equals(args[i].substring(1))) {
                     llvm = true;
+                } else if ("ssa".equals(args[i].substring(1))) {
+                    ssa = true;
                 } else {
                     System.err.println("unexpected option: " + args[i]);
                     System.exit(1);
