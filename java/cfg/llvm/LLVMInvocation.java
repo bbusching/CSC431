@@ -3,8 +3,13 @@ package cfg.llvm;
 import ast.Type;
 import ast.VoidType;
 import cfg.Value;
+import constprop.Bottom;
+import constprop.ConstImm;
+import constprop.ConstValue;
 
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Created by Brad on 4/20/2017.
@@ -40,5 +45,37 @@ public class LLVMInvocation implements LLVMInstruction {
         sb.append(")");
         return sb.toString();
 
+    }
+
+    @Override
+    public LLVMRegister getDefRegister() {
+        return result;
+    }
+
+    @Override
+    public List<LLVMRegister> getUseRegisters() {
+        List<LLVMRegister> uses = new ArrayList<>();
+        for (Value arg : args) {
+            if (arg instanceof LLVMRegister) {
+                uses.add((LLVMRegister) arg);
+            }
+        }
+        return uses;
+    }
+
+    public ConstValue initialize(Map<String, ConstValue> valueByRegister) {
+        return new Bottom();
+    }
+
+    public ConstValue evaluate(Map<String, ConstValue> valueByRegister) {
+        return null;
+    }
+
+    public void replace(String reg, ConstImm value) {
+        for (int i = 0; i < args.length; ++i) {
+            if (args[i] instanceof LLVMRegister && args[i].toString().equals(reg)) {
+                args[i] = new LLVMImmediate(value.getVal());
+            }
+        }
     }
 }

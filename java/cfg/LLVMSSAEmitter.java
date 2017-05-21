@@ -2,6 +2,10 @@ package cfg;
 
 import ast.*;
 import cfg.llvm.*;
+import constprop.Bottom;
+import constprop.ConstImm;
+import constprop.ConstValue;
+import constprop.Top;
 
 import java.io.File;
 import java.io.FileNotFoundException;
@@ -10,13 +14,19 @@ import java.util.*;
 import java.util.stream.Collectors;
 
 public class LLVMSSAEmitter {
-    public static void writeLlvm(Program prog, String filename) {
+    public static void writeLlvm(Program prog, String filename, boolean sccp, boolean uce) {
         try (PrintWriter pw = new PrintWriter(new File(filename))) {
             writeConstants(pw);
             writeStructs(prog.getTypes(), pw);
             writeGlobals(prog.getDecls(), pw);
             for (Function f : prog.getFuncs()) {
-                writeFunction(f, pw, createSymbolTable(prog), createStructTable(prog.getTypes()), createArgTypesByFun(prog.getFuncs()));
+                writeFunction(f,
+                              pw,
+                              createSymbolTable(prog),
+                              createStructTable(prog.getTypes()),
+                              createArgTypesByFun(prog.getFuncs()),
+                              sccp,
+                              uce);
             }
         } catch (FileNotFoundException e) {
             System.err.println(String.format("Could not find/open file %s.", filename));
@@ -77,7 +87,9 @@ public class LLVMSSAEmitter {
                                       PrintWriter pw,
                                       Map<String, Pair<Type, VariableScope>> symbolTable,
                                       Map<String, Map<String, Pair<Integer, Type>>> structTable,
-                                      Map<String, List<Type>> argTypesByFun) {
+                                      Map<String, List<Type>> argTypesByFun,
+                                      boolean sccp,
+                                      boolean uce) {
         BasicBlock startBlock = new BasicBlock();
         startBlock.seal();
 
@@ -97,28 +109,35 @@ public class LLVMSSAEmitter {
         }
         pw.println(") {");
 
-
-//        LLVMRegister retval = null;
-//        if (!(f.getRetType() instanceof VoidType)) {
-//            retval = new LLVMRegister(f.getRetType(), "%_retval_");
-//            startBlock.addInstruction(new LLVMAlloc(f.getRetType(), retval));
-//        }
-
         // Write locals
         for (Declaration local : f.getLocals()) {
-//            startBlock.addInstruction(new LLVMAlloc(local.getType(), new LLVMRegister(local.getType(),
-//                                                                                      "%" + local.getName())));
             symbolTable.put(local.getName(), new Pair<>(local.getType(), VariableScope.LOCAL));
         }
 
         BasicBlock returnBlock = new BasicBlock();
-        BasicBlock returned = writeStatement(f.getBody(), startBlock, returnBlock, null, symbolTable, structTable, argTypesByFun);
+        BasicBlock returned = writeStatement(f.getBody(), startBlock, returnBlock, symbolTable, structTable, argTypesByFun);
         if (returned != returnBlock) {
             returned.addSuccessor(returnBlock);
             returnBlock.addPredecessor(returned);
             returned.addInstruction(new LLVMJump(returnBlock.getLabel()));
         }
         returnBlock.seal();
+        if (!(f.getRetType() instanceof VoidType)) {
+            returnBlock.addInstruction(new LLVMReturn(f.getRetType(), returnBlock.readVariabe("_retval", f.getRetType())));
+        } else {
+            returnBlock.addInstruction(new LLVMReturnVoid());
+        }
+
+        if (sccp) {
+            do {
+                propogateConstants(startBlock, f.getParams());
+            } while (fixBranches(startBlock));
+        }
+        if (uce) {
+            do {
+            } while (elimiateUselessCode(startBlock, f.getParams()));
+        }
+
         Set<BasicBlock> visited = new HashSet<>();
         Queue<BasicBlock> queue = new ArrayDeque<>();
         visited.add(startBlock);
@@ -134,11 +153,6 @@ public class LLVMSSAEmitter {
             cur.writeBlock(pw);
         }
 
-        if (!(f.getRetType() instanceof VoidType)) {
-            returnBlock.addInstruction(new LLVMReturn(f.getRetType(), returnBlock.readVariabe("_retval", f.getRetType())));
-        } else {
-            returnBlock.addInstruction(new LLVMReturnVoid());
-        }
         returnBlock.writeBlock(pw);
 
         pw.println("}\n");
@@ -147,7 +161,6 @@ public class LLVMSSAEmitter {
     private static BasicBlock writeStatement(Statement stmt,
                                              BasicBlock currentBlock,
                                              BasicBlock returnBlock,
-                                             LLVMRegister retval,
                                              Map<String, Pair<Type, VariableScope>> symbolTable,
                                              Map<String, Map<String, Pair<Integer, Type>>> structTable,
                                              Map<String, List<Type>> argTypesByFun) {
@@ -177,7 +190,7 @@ public class LLVMSSAEmitter {
         } else if (stmt instanceof BlockStatement) {
             BasicBlock b = currentBlock;
             for (Statement s : ((BlockStatement) stmt).getStatements()) {
-                b = writeStatement(s, b, returnBlock, retval, symbolTable, structTable, argTypesByFun);
+                b = writeStatement(s, b, returnBlock, symbolTable, structTable, argTypesByFun);
                 if (b == returnBlock) {
                     return returnBlock;
                 }
@@ -191,7 +204,6 @@ public class LLVMSSAEmitter {
             BasicBlock then = writeStatement(((ConditionalStatement) stmt).getThenBlock(),
                                              thenBlock,
                                              returnBlock,
-                                             retval,
                                              symbolTable,
                                              structTable,
                                              argTypesByFun);
@@ -201,7 +213,6 @@ public class LLVMSSAEmitter {
             BasicBlock els = writeStatement(((ConditionalStatement) stmt).getElseBlock(),
                                             elseBlock,
                                             returnBlock,
-                                            retval,
                                             symbolTable,
                                             structTable,
                                             argTypesByFun);
@@ -248,7 +259,6 @@ public class LLVMSSAEmitter {
             Value val = writeExpr(((ReturnStatement) stmt).getExpression(), currentBlock, symbolTable, structTable, argTypesByFun);
             currentBlock.addSuccessor(returnBlock);
             returnBlock.addPredecessor(currentBlock);
-//            currentBlock.addInstruction(new LLVMStore(retval.getType(), val, retval));
             currentBlock.writeVariable("_retval", val);
             currentBlock.addInstruction(new LLVMJump(returnBlock.getLabel()));
             return returnBlock;
@@ -262,7 +272,7 @@ public class LLVMSSAEmitter {
             BasicBlock body = new BasicBlock();
             BasicBlock join = new BasicBlock();
             currentBlock.addInstruction(new LLVMConditionalBranch(guard, body.getLabel(), join.getLabel()));
-            BasicBlock returned = writeStatement(((WhileStatement) stmt).getBody(), body, returnBlock, retval,
+            BasicBlock returned = writeStatement(((WhileStatement) stmt).getBody(), body, returnBlock,
                                                  symbolTable, structTable, argTypesByFun);
             if (returned != returnBlock) {
                 guard = writeExpr(((WhileStatement) stmt).getGuard(), returned, symbolTable, structTable, argTypesByFun);
@@ -439,31 +449,199 @@ public class LLVMSSAEmitter {
         throw new RuntimeException("Invalid Expression");
     }
 
-//    private static LLVMRegister writeLval(Lvalue lval,
-//                                          BasicBlock curBlock,
-//                                          Map<String, Pair<Type, VariableScope>> symbolTable,
-//                                          Map<String, Map<String, Pair<Integer, Type>>> structTable,
-//                                          Map<String, List<Type>> argTypesByFun) {
-//        if (lval instanceof LvalueId) {
-//            Pair<Type, VariableScope> id = symbolTable.get(((LvalueId) lval).getId());
-//            if (id.getSecond() == VariableScope.LOCAL) {
-//                return (LLVMRegister) curBlock.readVariabe(((LvalueId) lval).getId(), id.getFirst());
-//            } else if (id.getSecond() == VariableScope.GLOBAL) {
-//                return new LLVMRegister(id.getFirst(), "@" + ((LvalueId) lval).getId());
-//            } else if (id.getSecond() == VariableScope.PARAM) {
-//                return (LLVMRegister) curBlock.readVariabe(((LvalueId) lval).getId(), id.getFirst());
-//            }
-//        } else if (lval instanceof LvalueDot) {
-//            LLVMRegister left = (LLVMRegister) writeExpr(((LvalueDot) lval).getLeft(), curBlock, symbolTable,
-//                                                         structTable, argTypesByFun);
-//            StructType structType = (StructType) left.getType();
-//            Pair<Integer, Type> field = structTable.get(structType.getName()).get(((LvalueDot) lval).getId());
-//            LLVMRegister result = new LLVMRegister(field.getSecond());
-//            curBlock.addInstruction(new LLVMLoadField(structType, result, left, field.getFirst()));
-//            return result;
-//        }
-//        throw new RuntimeException("Invalid Lvalue.");
-//    }
+    private static void propogateConstants(BasicBlock startBlock, List<Declaration> params) {
+        Map<String, ConstValue> valueByRegister = new HashMap<>();
+        Set<LLVMRegister> ssaWorklist = new HashSet<>();
+        Map<String, DefUse> defUseMap = generateDefUseMap(startBlock, params, valueByRegister, ssaWorklist);
+
+        while (!ssaWorklist.isEmpty()) {
+            LLVMRegister cur = ssaWorklist.toArray(new LLVMRegister[ssaWorklist.size()])[0];
+            ssaWorklist.remove(cur);
+            DefUse du = defUseMap.get(cur.toString());
+            for (LLVMInstruction use : du.getUses()) {
+                LLVMRegister reg = use.getDefRegister();
+                if (reg != null) {
+                    ConstValue m = valueByRegister.get(reg.toString());
+                    if (m != null && !(m instanceof Bottom)) {
+                        ConstValue t = use.evaluate(valueByRegister);
+                        if (!m.eq(t)) {
+                            valueByRegister.put(reg.toString(), t);
+                            ssaWorklist.add(reg);
+                        }
+                    }
+                }
+            }
+        }
+        for (Map.Entry<String, ConstValue> e : valueByRegister.entrySet()) {
+            if (e.getValue() instanceof ConstImm) {
+                for (LLVMInstruction use : defUseMap.get(e.getKey()).getUses()) {
+                    use.replace(e.getKey(), (ConstImm)e.getValue());
+                }
+            }
+        }
+    }
+
+    private static boolean elimiateUselessCode(BasicBlock block, List<Declaration> params) {
+        Map<LLVMInstruction, BasicBlock> blockByInstruction = new HashMap<>();
+        Map<String, DefUse> defUseMap = new HashMap<>();
+        for (Declaration param : params) {
+            defUseMap.put("%" + param.getName(),new DefUse(null));
+        }
+        Queue<BasicBlock> visited = new ArrayDeque<>();
+        Queue<BasicBlock> toVisit = new ArrayDeque<>();
+        toVisit.add(block);
+        while (!toVisit.isEmpty()) {
+            BasicBlock cur = toVisit.poll();
+            visited.add(cur);
+            for (BasicBlock succ : cur.getSuccessors()) {
+                if (!visited.contains(succ)) {
+                    toVisit.add(succ);
+                }
+            }
+
+            for (LLVMPhi phi : cur.getPhis()) {
+                blockByInstruction.put(phi, cur);
+                LLVMRegister def = phi.getDefRegister();
+                if (def != null) {
+                    defUseMap.put(def.toString(), new DefUse(phi));
+                }
+                for (LLVMRegister use : phi.getUseRegisters()) {
+                    if (use.toString().charAt(0) != '@') {
+                        defUseMap.get(use.toString()).addUse(phi);
+                    }
+                }
+            }
+            for (LLVMInstruction inst : cur.getInstructions()) {
+                blockByInstruction.put(inst, cur);
+                LLVMRegister def = inst.getDefRegister();
+                if (def != null) {
+                    defUseMap.put(def.toString(), new DefUse(inst));
+                }
+                for (LLVMRegister use : inst.getUseRegisters()) {
+                    if (use.toString().charAt(0) != '@') {
+                        defUseMap.get(use.toString()).addUse(inst);
+                    }
+                }
+            }
+        }
+
+        boolean changed = false;
+        for (DefUse du : defUseMap.values()) {
+            if (du.getUses().size() == 0 && du.getDefinition() != null) {
+                changed = true;
+                blockByInstruction.get(du.getDefinition()).remove(du.getDefinition());
+            }
+        }
+        return changed;
+    }
+
+    private static boolean fixBranches(BasicBlock block) {
+        Queue<BasicBlock> visited = new ArrayDeque<>();
+        Queue<BasicBlock> toVisit = new ArrayDeque<>();
+        toVisit.add(block);
+        while (!toVisit.isEmpty()) {
+            BasicBlock cur = toVisit.poll();
+            visited.add(cur);
+            for (BasicBlock succ : cur.getSuccessors()) {
+                if (!visited.contains(succ)) {
+                    toVisit.add(succ);
+                }
+            }
+
+            List<LLVMInstruction> insts = cur.getInstructions();
+            LLVMInstruction inst = insts.get(insts.size() - 1);
+            if (inst instanceof LLVMConditionalBranch && ((LLVMConditionalBranch) inst).isTrivial()) {
+                insts.remove(inst);
+                Pair<LLVMJump, String> info = ((LLVMConditionalBranch) inst).getNewBranchInstAndBadLabel();
+                insts.add(info.getFirst());
+                removeBlock(cur, info.getSecond());
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static void removeBlock(BasicBlock block, String label) {
+        Queue<BasicBlock> visited = new ArrayDeque<>();
+        Queue<BasicBlock> toVisit = new ArrayDeque<>();
+        toVisit.add(block);
+        while (!toVisit.isEmpty()) {
+            BasicBlock cur = toVisit.poll();
+            visited.add(cur);
+            for (BasicBlock succ : cur.getSuccessors()) {
+                if (!visited.contains(succ)) {
+                    toVisit.add(succ);
+                }
+            }
+
+            if (cur.getLabel().equals(label)) {
+                cur.setExecutable(false);
+            }
+            for (LLVMPhi phi : cur.getPhis()) {
+                phi.removeLabel(label);
+            }
+        }
+    }
+
+    private static Map<String, DefUse> generateDefUseMap(BasicBlock startBlock,
+                                                         List<Declaration> params,
+                                                         Map<String, ConstValue> valueByRegister,
+                                                         Set<LLVMRegister> ssaWorklist) {
+        Map<String, DefUse> defUseMap = new HashMap<>();
+        for (Declaration param : params) {
+            defUseMap.put("%" + param.getName(),new DefUse(null));
+        }
+        Queue<BasicBlock> visited = new ArrayDeque<>();
+        Queue<BasicBlock> toVisit = new ArrayDeque<>();
+        toVisit.add(startBlock);
+        List<LLVMPhi> phis = new ArrayList<>();
+        while (!toVisit.isEmpty()) {
+            BasicBlock cur = toVisit.poll();
+            visited.add(cur);
+            for (BasicBlock succ : cur.getSuccessors()) {
+                if (!visited.contains(succ)) {
+                    toVisit.add(succ);
+                }
+            }
+
+            for (LLVMPhi phi : cur.getPhis()) {
+                LLVMRegister def = phi.getDefRegister();
+                if (def != null) {
+                    defUseMap.put(def.toString(), new DefUse(phi));
+                }
+                phis.add(phi);
+                ConstValue v = phi.initialize(valueByRegister);
+                if (v != null && !(v instanceof Top)) {
+                    ssaWorklist.add(phi.getDefRegister());
+                }
+                valueByRegister.put(phi.getDefRegister().toString(), v);
+            }
+            for (LLVMInstruction inst : cur.getInstructions()) {
+                LLVMRegister def = inst.getDefRegister();
+                if (def != null) {
+                    defUseMap.put(def.toString(), new DefUse(inst));
+                }
+                for (LLVMRegister use : inst.getUseRegisters()) {
+                    if (use.toString().charAt(0) != '@') {
+                        defUseMap.get(use.toString()).addUse(inst);
+                    }
+                }
+                ConstValue v = inst.initialize(valueByRegister);
+                if (v != null) {
+                    if  (!(v instanceof Top)) {
+                        ssaWorklist.add(inst.getDefRegister());
+                    }
+                    valueByRegister.put(inst.getDefRegister().toString(), v);
+                }
+            }
+        }
+        for (LLVMPhi phi : phis) {
+            for (LLVMRegister use : phi.getUseRegisters()) {
+                defUseMap.get(use.toString()).addUse(phi);
+            }
+        }
+        return defUseMap;
+    }
 
     private static Map<String, Pair<Type, VariableScope>> createSymbolTable(Program program) {
         Map<String, Pair<Type, VariableScope>> symbolTable = new HashMap<>();

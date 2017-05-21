@@ -10,6 +10,8 @@ public class MiniCompiler {
     private static String _inputFile = null;
     private static boolean llvm = false;
     private static boolean ssa = false;
+    private static boolean sccp = false;
+    private static boolean uce = false;
 
     public static void main(String[] args) throws TypeChecker.TypeCheckerException {
         parseParameters(args);
@@ -32,7 +34,7 @@ public class MiniCompiler {
                         String.format("%s.ll", _inputFile.substring(0, _inputFile.lastIndexOf('.')))
                         : String.format("%s.ll", _inputFile);
                 if (ssa) {
-                    LLVMSSAEmitter.writeLlvm(program, filename);
+                    LLVMSSAEmitter.writeLlvm(program, filename, sccp, uce);
                 } else {
                     LLVMEmitter.writeLlvm(program, filename);
                 }
@@ -47,6 +49,10 @@ public class MiniCompiler {
                     llvm = true;
                 } else if ("ssa".equals(args[i].substring(1))) {
                     ssa = true;
+                } else if ("sccp".equals(args[i].substring(1))) {
+                    sccp = true;
+                } else if ("uce".equals(args[i].substring(1))) {
+                    uce = true;
                 } else {
                     System.err.println("unexpected option: " + args[i]);
                     System.exit(1);

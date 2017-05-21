@@ -13,6 +13,7 @@ import java.util.List;
 import java.util.Map;
 
 public class BasicBlock {
+    private boolean executable = true;
     private static int num = 0;
     private String label;
     private boolean sealed = false;
@@ -22,12 +23,24 @@ public class BasicBlock {
     private List<LLVMPhi> phis = new ArrayList<>();
     private List<LLVMInstruction> instructions = new ArrayList<>();
 
+    public List<LLVMInstruction> getInstructions() {
+        return instructions;
+    }
+
+    public List<LLVMPhi> getPhis() {
+        return phis;
+    }
+
     public BasicBlock() {
         this.label = "L" + num++;
     }
 
     public String getLabel() {
         return this.label;
+    }
+
+    public void setExecutable(boolean executable) {
+        this.executable = executable;
     }
 
     public void addInstruction(LLVMInstruction inst) {
@@ -114,12 +127,19 @@ public class BasicBlock {
     }
 
     public void writeBlock(PrintWriter pw) {
-        pw.println(String.format("%s:", this.label));
-        for (LLVMPhi phi : phis) {
-            pw.println(String.format("  %s", phi.toString()));
+        if (executable) {
+            pw.println(String.format("%s:", this.label));
+            for (LLVMPhi phi : phis) {
+                pw.println(String.format("  %s", phi.toString()));
+            }
+            for (LLVMInstruction inst : this.instructions) {
+                pw.println(String.format("  %s", inst.toString()));
+            }
         }
-        for (LLVMInstruction inst: this.instructions) {
-            pw.println(String.format("  %s", inst.toString()));
-        }
+    }
+
+    public void remove(LLVMInstruction inst) {
+        phis.remove(inst);
+        instructions.remove(inst);
     }
 }
