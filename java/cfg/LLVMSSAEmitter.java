@@ -135,7 +135,7 @@ public class LLVMSSAEmitter {
         }
         if (uce) {
             do {
-            } while (elimiateUselessCode(startBlock, f.getParams()));
+            } while (eliminateUselessCode(startBlock, f.getParams()));
         }
 
         Set<BasicBlock> visited = new HashSet<>();
@@ -481,9 +481,10 @@ public class LLVMSSAEmitter {
         }
     }
 
-    private static boolean elimiateUselessCode(BasicBlock block, List<Declaration> params) {
+    private static boolean eliminateUselessCode(BasicBlock block, List<Declaration> params) {
         Map<LLVMInstruction, BasicBlock> blockByInstruction = new HashMap<>();
         Map<String, DefUse> defUseMap = new HashMap<>();
+        List<LLVMPhi> phis = new ArrayList<>();
         for (Declaration param : params) {
             defUseMap.put("%" + param.getName(),new DefUse(null));
         }
@@ -505,11 +506,7 @@ public class LLVMSSAEmitter {
                 if (def != null) {
                     defUseMap.put(def.toString(), new DefUse(phi));
                 }
-                for (LLVMRegister use : phi.getUseRegisters()) {
-                    if (use.toString().charAt(0) != '@') {
-                        defUseMap.get(use.toString()).addUse(phi);
-                    }
-                }
+                phis.add(phi);
             }
             for (LLVMInstruction inst : cur.getInstructions()) {
                 blockByInstruction.put(inst, cur);
@@ -524,10 +521,17 @@ public class LLVMSSAEmitter {
                 }
             }
         }
+        for (LLVMPhi phi : phis) {
+            for (LLVMRegister use : phi.getUseRegisters()) {
+                if (use.toString().charAt(0) != '@') {
+                    defUseMap.get(use.toString()).addUse(phi);
+                }
+            }
+        }
 
         boolean changed = false;
         for (DefUse du : defUseMap.values()) {
-            if (du.getUses().size() == 0 && du.getDefinition() != null) {
+            if (du.getUses().size() == 0 && du.getDefinition() != null && !(du.getDefinition() instanceof LLVMInvocation)) {
                 changed = true;
                 blockByInstruction.get(du.getDefinition()).remove(du.getDefinition());
             }
@@ -575,10 +579,10 @@ public class LLVMSSAEmitter {
             }
 
             if (cur.getLabel().equals(label)) {
-                cur.setExecutable(false);
-            }
-            for (LLVMPhi phi : cur.getPhis()) {
-                phi.removeLabel(label);
+                cur.removePredecessor(block);
+                for (LLVMPhi phi : cur.getPhis()) {
+                    phi.removeLabel(block.getLabel());
+                }
             }
         }
     }
@@ -590,6 +594,8 @@ public class LLVMSSAEmitter {
         Map<String, DefUse> defUseMap = new HashMap<>();
         for (Declaration param : params) {
             defUseMap.put("%" + param.getName(),new DefUse(null));
+            valueByRegister.put("%" + param.getName(), new Bottom());
+            ssaWorklist.add(new LLVMRegister(param.getType(), "%" + param.getName()));
         }
         Queue<BasicBlock> visited = new ArrayDeque<>();
         Queue<BasicBlock> toVisit = new ArrayDeque<>();

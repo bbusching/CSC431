@@ -7,10 +7,7 @@ import ast.Type;
 import cfg.llvm.*;
 
 import java.io.PrintWriter;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 
 public class BasicBlock {
     private boolean executable = true;
@@ -141,5 +138,32 @@ public class BasicBlock {
     public void remove(LLVMInstruction inst) {
         phis.remove(inst);
         instructions.remove(inst);
+    }
+
+    public void removePredecessor(BasicBlock pred) {
+        predecessors.remove(pred);
+        if (predecessors.size() == 0) {
+            setExecutable(false);
+            Queue<BasicBlock> toVisit = new ArrayDeque<>();
+            Set<BasicBlock> visited = new HashSet<>();
+            for (BasicBlock succ : successors) {
+                toVisit.add(succ);
+                visited.add(succ);
+            }
+
+            while (!toVisit.isEmpty()) {
+                BasicBlock cur = toVisit.poll();
+                for (BasicBlock bb : cur.getSuccessors()) {
+                    if (!visited.contains(bb)) {
+                        toVisit.add(bb);
+                        visited.add(bb);
+                    }
+                }
+
+                for (LLVMPhi phi : cur.getPhis()) {
+                    phi.removeLabel(this.label);
+                }
+            }
+        }
     }
 }

@@ -83,7 +83,8 @@ public class LLVMArithmetic implements LLVMInstruction {
                     if (((LLVMImmediate) op2).getVal() == 0) {
                         return new Bottom();
                     } else {
-                        return new ConstImm(((LLVMImmediate) op1).getVal() / ((LLVMImmediate) op2).getVal());
+                        return new ConstImm(
+                                (int) Math.floor((double) ((LLVMImmediate) op1).getVal()) / ((LLVMImmediate) op2).getVal());
                     }
                 default:
                     throw new RuntimeException("Shouldn't be here");
@@ -123,7 +124,8 @@ public class LLVMArithmetic implements LLVMInstruction {
                     if (((ConstImm) cv2).getVal() == 0) {
                         return new Bottom();
                     } else {
-                        return new ConstImm(((ConstImm) cv1).getVal() / ((ConstImm) cv2).getVal());
+                        return new ConstImm(
+                                (int) Math.floor((double) ((ConstImm) cv1).getVal() / ((ConstImm) cv2).getVal()));
                     }
                 default:
                     throw new RuntimeException("Shouldn't be here");

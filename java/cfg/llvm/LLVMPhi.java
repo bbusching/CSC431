@@ -2,10 +2,7 @@ package cfg.llvm;
 
 import cfg.Pair;
 import cfg.Value;
-import constprop.Bottom;
-import constprop.ConstImm;
-import constprop.ConstValue;
-import constprop.Top;
+import constprop.*;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -76,6 +73,8 @@ public class LLVMPhi implements LLVMInstruction {
     private ConstValue getCV(Value v, Map<String, ConstValue> valueMap) {
         if (v instanceof LLVMImmediate) {
             return new ConstImm(((LLVMImmediate) v).getVal());
+        } else if (v instanceof LLVMNull) {
+            return new ConstNull();
         } else if (v instanceof LLVMRegister) {
             return valueMap.getOrDefault(((LLVMRegister) v).toString(), new Top());
         } else {

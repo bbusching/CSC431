@@ -4,21 +4,21 @@ package constprop;
  * Created by Brad on 5/19/2017.
  */
 public class ConstImm extends ConstValue {
-    private int val;
+    private long val;
 
-    public ConstImm(int val) {
+    public ConstImm(long val) {
         this.val = val;
     }
 
     @Override
     public boolean equals(Object o) {
         if (o instanceof ConstImm) {
-            return Integer.compare(this.val, ((ConstImm) o).val) == 0;
+            return Long.compare(this.val, ((ConstImm) o).val) == 0;
         }
         return false;
     }
 
-    public int getVal() {
+    public long getVal() {
         return val;
     }
 

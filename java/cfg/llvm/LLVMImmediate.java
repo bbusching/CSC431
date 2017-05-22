@@ -5,9 +5,9 @@ import ast.Type;
 import cfg.Value;
 
 public class LLVMImmediate implements Value {
-    private int val;
+    private long val;
 
-    public LLVMImmediate(int val) {
+    public LLVMImmediate(long val) {
         this.val = val;
     }
 
@@ -15,11 +15,11 @@ public class LLVMImmediate implements Value {
         return new IntType();
     }
 
-    public int getVal() {
+    public long getVal() {
         return this.val;
     }
 
     public String toString() {
-        return Integer.toString(this.val);
+        return Long.toString(this.val);
     }
 }
