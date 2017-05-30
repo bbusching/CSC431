@@ -1,8 +1,9 @@
-package cfg.llvm;
+package cfg.arm;
 
 import constprop.ConstImm;
 import constprop.ConstValue;
 
+import java.io.PrintWriter;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -10,25 +11,22 @@ import java.util.Map;
 /**
  * Created by Brad on 4/20/2017.
  */
-public class LLVMJump implements LLVMInstruction {
-    private String label;
-
-    public LLVMJump(String label) {
-        this.label = label;
+public class ARMReturnVoid implements ARMInstruction {
+    private int locals;
+    public ARMReturnVoid(int locals) {
+        this.locals = locals;
     }
-
     public String toString() {
-        return String.format("br label %%%s", label);
+        return "ret void";
     }
-
     @Override
-    public LLVMRegister getDefRegister() {
+    public ARMRegister getDefRegister() {
         return null;
     }
 
     @Override
-    public List<LLVMRegister> getUseRegisters() {
-        List<LLVMRegister> uses = new ArrayList<>();
+    public List<ARMRegister> getUseRegisters() {
+        List<ARMRegister> uses = new ArrayList<>();
         return uses;
     }
 
@@ -41,5 +39,11 @@ public class LLVMJump implements LLVMInstruction {
     }
 
     public void replace(String reg, ConstImm value) {
+    }
+
+    public void write(PrintWriter pw) {
+        pw.println("\tadd sp, sp, #" + 4 * locals);
+        pw.println("\tpop {fp, lr}");
+        pw.println("\tbx lr");
     }
 }

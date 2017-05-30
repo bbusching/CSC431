@@ -4,9 +4,9 @@ package constprop;
  * Created by Brad on 5/19/2017.
  */
 public class ConstImm extends ConstValue {
-    private long val;
+    private int val;
 
-    public ConstImm(long val) {
+    public ConstImm(int val) {
         this.val = val;
     }
 
@@ -18,7 +18,7 @@ public class ConstImm extends ConstValue {
         return false;
     }
 
-    public long getVal() {
+    public int getVal() {
         return val;
     }
 

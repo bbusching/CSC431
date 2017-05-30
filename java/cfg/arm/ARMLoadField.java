@@ -1,10 +1,11 @@
-package cfg.llvm;
+package cfg.arm;
 
 import ast.Type;
 import constprop.Bottom;
 import constprop.ConstImm;
 import constprop.ConstValue;
 
+import java.io.PrintWriter;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -12,13 +13,13 @@ import java.util.Map;
 /**
  * Created by Brad on 4/20/2017.
  */
-public class LLVMLoadField implements LLVMInstruction {
+public class ARMLoadField implements ARMInstruction {
     private Type type;
-    private LLVMRegister result;
-    private LLVMRegister ptr;
+    private ARMRegister result;
+    private ARMRegister ptr;
     private int index;
 
-    public LLVMLoadField(Type type, LLVMRegister result, LLVMRegister ptr, int index) {
+    public ARMLoadField(Type type, ARMRegister result, ARMRegister ptr, int index) {
         this.type = type;
         this.result = result;
         this.ptr = ptr;
@@ -33,13 +34,13 @@ public class LLVMLoadField implements LLVMInstruction {
                              index);
     }
     @Override
-    public LLVMRegister getDefRegister() {
+    public ARMRegister getDefRegister() {
         return result;
     }
 
     @Override
-    public List<LLVMRegister> getUseRegisters() {
-        List<LLVMRegister> uses = new ArrayList<>();
+    public List<ARMRegister> getUseRegisters() {
+        List<ARMRegister> uses = new ArrayList<>();
         uses.add(ptr);
         return uses;
     }
@@ -53,5 +54,11 @@ public class LLVMLoadField implements LLVMInstruction {
     }
 
     public void replace(String reg, ConstImm value) {
+    }
+
+    public void write(PrintWriter pw) {
+        ARMRegister temp = new ARMRegister(type);
+        pw.println("\tldr " + temp.toString() + ", " + ptr.toString());
+        pw.println("\tldr " + result.toString() + "[" + temp.toString() + ", #" + index * 4 + "]");
     }
 }

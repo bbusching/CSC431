@@ -1,9 +1,10 @@
-package cfg.llvm;
+package cfg.arm;
 
 import cfg.Pair;
 import cfg.Value;
 import constprop.*;
 
+import java.io.PrintWriter;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -11,12 +12,12 @@ import java.util.Map;
 /**
  * Created by Brad on 5/5/2017.
  */
-public class LLVMPhi implements LLVMInstruction {
+public class ARMPhi implements ARMInstruction {
     private String identifier;
-    private LLVMRegister result;
+    private ARMRegister result;
     private List<Pair<Value, String>> operands = new ArrayList<>();
 
-    public LLVMPhi(String identifier, LLVMRegister result) {
+    public ARMPhi(String identifier, ARMRegister result) {
         this.identifier = identifier;
         this.result = result;
     }
@@ -29,7 +30,7 @@ public class LLVMPhi implements LLVMInstruction {
         return identifier;
     }
 
-    public LLVMRegister getResult() {
+    public ARMRegister getResult() {
         return result;
     }
 
@@ -47,16 +48,16 @@ public class LLVMPhi implements LLVMInstruction {
         return sb.toString();
     }
     @Override
-    public LLVMRegister getDefRegister() {
+    public ARMRegister getDefRegister() {
         return result;
     }
 
     @Override
-    public List<LLVMRegister> getUseRegisters() {
-        List<LLVMRegister> uses = new ArrayList<>();
+    public List<ARMRegister> getUseRegisters() {
+        List<ARMRegister> uses = new ArrayList<>();
         for (Pair<Value, String> pairs : operands) {
-            if (pairs.getFirst() instanceof LLVMRegister) {
-                uses.add((LLVMRegister) pairs.getFirst());
+            if (pairs.getFirst() instanceof ARMRegister) {
+                uses.add((ARMRegister) pairs.getFirst());
             }
         }
         return uses;
@@ -71,12 +72,12 @@ public class LLVMPhi implements LLVMInstruction {
     }
 
     private ConstValue getCV(Value v, Map<String, ConstValue> valueMap) {
-        if (v instanceof LLVMImmediate) {
-            return new ConstImm(((LLVMImmediate) v).getVal());
-        } else if (v instanceof LLVMNull) {
+        if (v instanceof ARMImmediate) {
+            return new ConstImm(((ARMImmediate) v).getVal());
+        } else if (v instanceof ARMNull) {
             return new ConstNull();
-        } else if (v instanceof LLVMRegister) {
-            return valueMap.getOrDefault(((LLVMRegister) v).toString(), new Top());
+        } else if (v instanceof ARMRegister) {
+            return valueMap.getOrDefault(((ARMRegister) v).toString(), new Top());
         } else {
             throw new RuntimeException(v.toString());
         }
@@ -92,9 +93,9 @@ public class LLVMPhi implements LLVMInstruction {
 
     public void replace(String reg, ConstImm value) {
         for (int i = 0; i < operands.size(); ++i) {
-            if (operands.get(i).getFirst() instanceof LLVMRegister && operands.get(i).getFirst().toString().equals(reg)) {
+            if (operands.get(i).getFirst() instanceof ARMRegister && operands.get(i).getFirst().toString().equals(reg)) {
                 Pair<Value, String> p = operands.remove(i);
-                operands.add(i, new Pair<>(new LLVMImmediate(value.getVal()), p.getSecond()));
+                operands.add(i, new Pair<>(new ARMImmediate(value.getVal()), p.getSecond()));
             }
         }
     }
@@ -105,5 +106,11 @@ public class LLVMPhi implements LLVMInstruction {
                 operands.remove(i);
             }
         }
+    }
+
+    public void write(PrintWriter pw) {}
+
+    public List<Pair<Value, String>> getOperands() {
+        return operands;
     }
 }

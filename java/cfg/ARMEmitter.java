@@ -1,7 +1,7 @@
 package cfg;
 
 import ast.*;
-import cfg.llvm.*;
+import cfg.arm.*;
 import constprop.Bottom;
 import constprop.ConstImm;
 import constprop.ConstValue;
@@ -13,11 +13,9 @@ import java.io.PrintWriter;
 import java.util.*;
 import java.util.stream.Collectors;
 
-public class LLVMSSAEmitter {
+public class ARMEmitter {
     public static void writeLlvm(Program prog, String filename, boolean sccp, boolean uce) {
         try (PrintWriter pw = new PrintWriter(new File(filename))) {
-            writeConstants(pw);
-            writeStructs(prog.getTypes(), pw);
             writeGlobals(prog.getDecls(), pw);
             for (Function f : prog.getFuncs()) {
                 writeFunction(f,
@@ -34,50 +32,22 @@ public class LLVMSSAEmitter {
         }
     }
 
-    private static void writeConstants(PrintWriter pw) {
-        pw.println("target triple=\"x86_64\"");
-        pw.println("declare i8* @malloc(i64)");
-        pw.println("declare void @free(i8*)");
-        pw.println("declare i32 @printf(i8*, ...)");
-        pw.println("declare i32 @scanf(i8*, ...)");
-        pw.println("@.println = private unnamed_addr constant [5 x i8] c\"%ld\\0A\\00\",align 1");
-        pw.println("@.print = private unnamed_addr constant [5 x i8] c\"%ld \\00\",align 1");
-        pw.println("@.read = private unnamed_addr constant [4 x i8] c\"%ld\\00\",align 1");
-        pw.println("@.read_scratch = common global i64 0, align 8\n");
-    }
-
-    private static void writeStructs(List<TypeDeclaration> structs, PrintWriter pw) {
-        for (TypeDeclaration td : structs) {
-            pw.print(String.format("%%struct.%s = type {", td.getName()));
-            List<Declaration> fields = td.getFields();
-            for (int i = 0; i < td.getFields().size(); ++i) {
-                if (fields.get(i).getType() instanceof IntType || fields.get(i).getType() instanceof BoolType) {
-                    pw.print("i64");
-                } else if (fields.get(i).getType() instanceof StructType) {
-                    pw.print(String.format("%%struct.%s*", ((StructType) fields.get(i).getType()).getName()));
-                } else {
-                    System.err.println(String.format("Unexpected field declaration: %S", fields.get(i).toString()));
-                }
-
-                if (i != fields.size() - 1) {
-                    pw.print(", ");
-                }
-            }
-            pw.println("}");
-        }
-        pw.println();
-    }
-
     private static void writeGlobals(List<Declaration> globals, PrintWriter pw) {
+        pw.println("\t.global __aeabi_idiv");
+        pw.println();
+        pw.println(".read");
+        pw.println("\t.ascii \"%ld\\000\"");
+        pw.println("\t.align 2");
+        pw.println(".print");
+        pw.println("\t.ascii \"%ld \\000\"");
+        pw.println("\t.align 2");
+        pw.println(".println");
+        pw.println("\t.ascii \"%ld\\012\\000\"");
+        pw.println("\t.align 2");
+        pw.println();
+        pw.println("\t.comm read_scratch, 4, 4");
         for (Declaration d : globals) {
-            if (d.getType() instanceof IntType || d.getType() instanceof BoolType) {
-                pw.println(String.format("@%s = common global i64 0, align 8", d.getName()));
-            } else if (d.getType() instanceof StructType) {
-                pw.println(String.format("@%s = common global %s null, align 8",
-                                         d.getName(), d.getType().toLlvmType()));
-            } else {
-                System.err.println(String.format("Unexpected field declaration: %S", d.toString()));
-            }
+            pw.println(String.format("\t.comm %s, 4, 4", d.getName()));
         }
         pw.println();
     }
@@ -94,20 +64,13 @@ public class LLVMSSAEmitter {
         startBlock.seal();
 
         // Write function header
-        pw.print(String.format("define %s @%s(", f.getRetType().toLlvmType(), f.getName()));
         for (int i = 0; i < f.getParams().size(); ++i) {
             symbolTable.put(f.getParams().get(i).getName(),
                             new Pair<>(f.getParams().get(i).getType(), VariableScope.PARAM));
-            pw.print(String.format("%s %%%s",
-                                   f.getParams().get(i).getType().toLlvmType(), f.getParams().get(i).getName()));
             startBlock.writeVariable(f.getParams().get(i).getName(),
-                                     new LLVMRegister(f.getParams().get(i).getType(),
+                                     new ARMRegister(f.getParams().get(i).getType(),
                                                       String.format("%%%s", f.getParams().get(i).getName())));
-            if (i != f.getParams().size() - 1) {
-                pw.print(", ");
-            }
         }
-        pw.println(") {");
 
         // Write locals
         for (Declaration local : f.getLocals()) {
@@ -115,17 +78,20 @@ public class LLVMSSAEmitter {
         }
 
         BasicBlock returnBlock = new BasicBlock();
-        BasicBlock returned = writeStatement(f.getBody(), startBlock, returnBlock, symbolTable, structTable, argTypesByFun);
+        BasicBlock returned = writeStatement(f.getBody(), startBlock, returnBlock, symbolTable, structTable, argTypesByFun,
+                                             f.getLocals());
         if (returned != returnBlock) {
             returned.addSuccessor(returnBlock);
             returnBlock.addPredecessor(returned);
-            returned.addInstruction(new LLVMJump(returnBlock.getLabel()));
+            returned.addInstruction(new ARMJump(returnBlock.getLabel()));
         }
         returnBlock.seal();
         if (!(f.getRetType() instanceof VoidType)) {
-            returnBlock.addInstruction(new LLVMReturn(f.getRetType(), returnBlock.readVariabe("_retval", f.getRetType())));
+            returnBlock.addInstruction(new ARMReturn(f.getRetType(),
+                                                     returnBlock.readVariable("_retval", f.getRetType()),
+                                                     f.getLocals().size()));
         } else {
-            returnBlock.addInstruction(new LLVMReturnVoid());
+            returnBlock.addInstruction(new ARMReturnVoid(f.getLocals().size()));
         }
 
         if (sccp) {
@@ -138,6 +104,23 @@ public class LLVMSSAEmitter {
             } while (eliminateUselessCode(startBlock, f.getParams()));
         }
 
+        fixPhis(startBlock);
+
+        pw.println("\t.text");
+        pw.println("\t.align 2");
+        pw.println("\t.global " + f.getName());
+        pw.println(f.getName() + ":");
+        pw.println("\tpush {fp, lr}");
+        pw.println("\tadd fp, sp, #4");
+        pw.println("\tsub sp, sp #" + 4 * f.getLocals().size());
+
+        for (int i = 0; i < f.getParams().size(); ++i) {
+            if (i < 4) {
+                pw.println("\tmov %" + f.getParams().get(i).getName() + ", r" + i);
+            } else {
+                pw.println("\tldr %" + f.getParams().get(i).getName() + ", [fp, #" + (4 + i * 4) + "]");
+            }
+        }
         Set<BasicBlock> visited = new HashSet<>();
         Queue<BasicBlock> queue = new ArrayDeque<>();
         visited.add(startBlock);
@@ -154,8 +137,8 @@ public class LLVMSSAEmitter {
         }
 
         returnBlock.writeBlock(pw);
-
-        pw.println("}\n");
+        pw.println();
+        pw.println();
     }
 
     private static BasicBlock writeStatement(Statement stmt,
@@ -163,41 +146,49 @@ public class LLVMSSAEmitter {
                                              BasicBlock returnBlock,
                                              Map<String, Pair<Type, VariableScope>> symbolTable,
                                              Map<String, Map<String, Pair<Integer, Type>>> structTable,
-                                             Map<String, List<Type>> argTypesByFun) {
+                                             Map<String, List<Type>> argTypesByFun,
+                                             List<Declaration> locals) {
         if (stmt instanceof AssignmentStatement) {
-            Value source = writeExpr(((AssignmentStatement) stmt).getSource(), currentBlock, symbolTable, structTable, argTypesByFun);
+            Value source = writeExpr(((AssignmentStatement) stmt).getSource(), currentBlock, symbolTable, structTable, argTypesByFun, locals);
             Lvalue lval = ((AssignmentStatement) stmt).getTarget();
             if (lval instanceof LvalueId) {
                 Pair<Type, VariableScope> id = symbolTable.get(((LvalueId) lval).getId());
                 if (id.getSecond() == VariableScope.LOCAL) {
                     currentBlock.writeVariable(((LvalueId) lval).getId(), source);
+//                    for (int i = 0; i < locals.size(); ++i) {
+//                        if (((LvalueId) lval).getId().equals(locals.get(i).getName())) {
+//                            currentBlock.addInstruction(
+//                                    new ARMStore(id.getFirst(), source, new ARMRegister(new IntType(), "fp, #-" + (4 + i * 4))));
+//                        }
+//                    }
                 } else if (id.getSecond() == VariableScope.GLOBAL) {
-                    LLVMRegister result =  new LLVMRegister(id.getFirst(), "@" + ((LvalueId) lval).getId());
-                    currentBlock.addInstruction(new LLVMStore(id.getFirst(), source, result));
+                    ARMRegister result = new ARMRegister(id.getFirst());
+                    currentBlock.addInstruction(new ARMLoadGlobal(((LvalueId) lval).getId(), result));
+                    currentBlock.addInstruction(new ARMStore(id.getFirst(), source, result));
                 } else if (id.getSecond() == VariableScope.PARAM) {
                     currentBlock.writeVariable(((LvalueId) lval).getId(), source);
                 }
             } else if (lval instanceof LvalueDot) {
-                LLVMRegister left = (LLVMRegister) writeExpr(((LvalueDot) lval).getLeft(), currentBlock, symbolTable,
-                                                             structTable, argTypesByFun);
+                ARMRegister left = (ARMRegister) writeExpr(((LvalueDot) lval).getLeft(), currentBlock, symbolTable,
+                                                           structTable, argTypesByFun, locals);
                 StructType structType = (StructType) left.getType();
                 Pair<Integer, Type> field = structTable.get(structType.getName()).get(((LvalueDot) lval).getId());
-                LLVMRegister result = new LLVMRegister(field.getSecond());
-                currentBlock.addInstruction(new LLVMLoadField(structType, result, left, field.getFirst()));
-                currentBlock.addInstruction(new LLVMStore(result.getType(), source, result));
+                ARMRegister result = new ARMRegister(field.getSecond());
+                currentBlock.addInstruction(new ARMLoadField(structType, result, left, field.getFirst()));
+                currentBlock.addInstruction(new ARMStore(result.getType(), source, result));
             }
             return currentBlock;
         } else if (stmt instanceof BlockStatement) {
             BasicBlock b = currentBlock;
             for (Statement s : ((BlockStatement) stmt).getStatements()) {
-                b = writeStatement(s, b, returnBlock, symbolTable, structTable, argTypesByFun);
+                b = writeStatement(s, b, returnBlock, symbolTable, structTable, argTypesByFun, locals);
                 if (b == returnBlock) {
                     return returnBlock;
                 }
             }
             return b;
         } else if (stmt instanceof ConditionalStatement) {
-            Value guard = writeExpr(((ConditionalStatement) stmt).getGuard(), currentBlock, symbolTable, structTable, argTypesByFun);
+            Value guard = writeExpr(((ConditionalStatement) stmt).getGuard(), currentBlock, symbolTable, structTable, argTypesByFun, locals);
             BasicBlock thenBlock = new BasicBlock();
             thenBlock.addPredecessor(currentBlock);
             thenBlock.seal();
@@ -206,7 +197,8 @@ public class LLVMSSAEmitter {
                                              returnBlock,
                                              symbolTable,
                                              structTable,
-                                             argTypesByFun);
+                                             argTypesByFun,
+                                             locals);
             BasicBlock elseBlock = new BasicBlock();
             elseBlock.addPredecessor(currentBlock);
             elseBlock.seal();
@@ -215,11 +207,12 @@ public class LLVMSSAEmitter {
                                             returnBlock,
                                             symbolTable,
                                             structTable,
-                                            argTypesByFun);
+                                            argTypesByFun,
+                                            locals);
 
             currentBlock.addSuccessor(thenBlock);
             currentBlock.addSuccessor(elseBlock);
-            currentBlock.addInstruction(new LLVMConditionalBranch(guard, thenBlock.getLabel(), elseBlock.getLabel()));
+            currentBlock.addInstruction(new ARMLLVMConditionalBranch(guard, thenBlock.getLabel(), elseBlock.getLabel()));
             if (then == returnBlock && els == returnBlock) {
                 return returnBlock;
             } else if (then == returnBlock) {
@@ -229,54 +222,52 @@ public class LLVMSSAEmitter {
             } else {
                 //jump then and else to new block
                 BasicBlock join = new BasicBlock();
-                then.addInstruction(new LLVMJump(join.getLabel()));
+                then.addInstruction(new ARMJump(join.getLabel()));
                 then.addSuccessor(join);
                 join.addPredecessor(then);
-                els.addInstruction(new LLVMJump(join.getLabel()));
+                els.addInstruction(new ARMJump(join.getLabel()));
                 els.addSuccessor(join);
                 join.addPredecessor(els);
                 join.seal();
                 return join;
             }
         } else if (stmt instanceof DeleteStatement) {
-            Value t = writeExpr(((DeleteStatement) stmt).getExpression(), currentBlock, symbolTable, structTable, argTypesByFun);
-            LLVMRegister ptr = new LLVMRegister(new PointerType());
-            currentBlock.addInstruction(new LLVMBitcast(ptr, t));
-            currentBlock.addInstruction(new LLVMFree(ptr));
+            Value t = writeExpr(((DeleteStatement) stmt).getExpression(), currentBlock, symbolTable, structTable, argTypesByFun, locals);
+            currentBlock.addInstruction(new ARMFree((ARMRegister) t));
             return currentBlock;
         } else if (stmt instanceof InvocationStatement) {
-            writeExpr(((InvocationStatement) stmt).getExpression(), currentBlock, symbolTable, structTable, argTypesByFun);
+            writeExpr(((InvocationStatement) stmt).getExpression(), currentBlock, symbolTable, structTable, argTypesByFun, locals);
             return currentBlock;
         } else if (stmt instanceof PrintLnStatement) {
-            Value t = writeExpr(((PrintLnStatement) stmt).getExpression(), currentBlock, symbolTable, structTable, argTypesByFun);
-            currentBlock.addInstruction(new LLVMPrint("@.println", t));
+            Value t = writeExpr(((PrintLnStatement) stmt).getExpression(), currentBlock, symbolTable, structTable, argTypesByFun, locals);
+            currentBlock.addInstruction(new ARMPrint(".println", t));
             return currentBlock;
         } else if (stmt instanceof PrintStatement) {
-            Value t = writeExpr(((PrintStatement) stmt).getExpression(), currentBlock, symbolTable, structTable, argTypesByFun);
-            currentBlock.addInstruction(new LLVMPrint("@.print", t));
+            Value t = writeExpr(((PrintStatement) stmt).getExpression(), currentBlock, symbolTable, structTable, argTypesByFun, locals);
+            currentBlock.addInstruction(new ARMPrint(".print", t));
             return currentBlock;
         } else if (stmt instanceof ReturnStatement) {
-            Value val = writeExpr(((ReturnStatement) stmt).getExpression(), currentBlock, symbolTable, structTable, argTypesByFun);
+            Value val = writeExpr(((ReturnStatement) stmt).getExpression(), currentBlock, symbolTable, structTable, argTypesByFun, locals);
             currentBlock.addSuccessor(returnBlock);
             returnBlock.addPredecessor(currentBlock);
             currentBlock.writeVariable("_retval", val);
-            currentBlock.addInstruction(new LLVMJump(returnBlock.getLabel()));
+            currentBlock.addInstruction(new ARMJump(returnBlock.getLabel()));
             return returnBlock;
         } else if (stmt instanceof ReturnEmptyStatement) {
             currentBlock.addSuccessor(returnBlock);
             returnBlock.addPredecessor(currentBlock);
-            currentBlock.addInstruction(new LLVMJump(returnBlock.getLabel()));
+            currentBlock.addInstruction(new ARMJump(returnBlock.getLabel()));
             return returnBlock;
         } else if (stmt instanceof WhileStatement) {
-            Value guard = writeExpr(((WhileStatement) stmt).getGuard(), currentBlock, symbolTable, structTable, argTypesByFun);
+            Value guard = writeExpr(((WhileStatement) stmt).getGuard(), currentBlock, symbolTable, structTable, argTypesByFun, locals);
             BasicBlock body = new BasicBlock();
             BasicBlock join = new BasicBlock();
-            currentBlock.addInstruction(new LLVMConditionalBranch(guard, body.getLabel(), join.getLabel()));
+            currentBlock.addInstruction(new ARMLLVMConditionalBranch(guard, body.getLabel(), join.getLabel()));
             BasicBlock returned = writeStatement(((WhileStatement) stmt).getBody(), body, returnBlock,
-                                                 symbolTable, structTable, argTypesByFun);
+                                                 symbolTable, structTable, argTypesByFun, locals);
             if (returned != returnBlock) {
-                guard = writeExpr(((WhileStatement) stmt).getGuard(), returned, symbolTable, structTable, argTypesByFun);
-                returned.addInstruction(new LLVMConditionalBranch(guard, body.getLabel(), join.getLabel()));
+                guard = writeExpr(((WhileStatement) stmt).getGuard(), returned, symbolTable, structTable, argTypesByFun, locals);
+                returned.addInstruction(new ARMLLVMConditionalBranch(guard, body.getLabel(), join.getLabel()));
                 returned.addSuccessor(body);
                 body.addPredecessor(returned);
                 returned.addSuccessor(join);
@@ -300,166 +291,181 @@ public class LLVMSSAEmitter {
                                    BasicBlock curBlock,
                                    Map<String, Pair<Type, VariableScope>> symbolTable,
                                    Map<String, Map<String, Pair<Integer, Type>>> structTable,
-                                   Map<String, List<Type>> argTypesByFun) {
+                                   Map<String, List<Type>> argTypesByFun,
+                                   List<Declaration> locals) {
         if (expr instanceof BinaryExpression) {
-            Value left = writeExpr(((BinaryExpression) expr).getLeft(), curBlock, symbolTable, structTable, argTypesByFun);
-            Value right = writeExpr(((BinaryExpression) expr).getRight(), curBlock, symbolTable, structTable, argTypesByFun);
-            LLVMRegister reg;
+            Value left = writeExpr(((BinaryExpression) expr).getLeft(), curBlock, symbolTable, structTable, argTypesByFun, locals);
+            Value right = writeExpr(((BinaryExpression) expr).getRight(), curBlock, symbolTable, structTable, argTypesByFun, locals);
+            ARMRegister reg;
             switch (((BinaryExpression) expr).getOperator()) {
                 case TIMES:
-                    reg = new LLVMRegister(new IntType());
+                    reg = new ARMRegister(new IntType());
                     curBlock.addInstruction(
-                            new LLVMArithmetic(LLVMArithmetic.Operator.MUL, new IntType(), reg, left, right));
+                            new ARMArithmetic(ARMArithmetic.Operator.MUL, new IntType(), reg, left, right));
                     return reg;
                 case DIVIDE:
-                    reg = new LLVMRegister(new IntType());
+                    reg = new ARMRegister(new IntType());
                     curBlock.addInstruction(
-                            new LLVMArithmetic(LLVMArithmetic.Operator.SDIV, new IntType(), reg, left, right));
+                            new ARMArithmetic(ARMArithmetic.Operator.SDIV, new IntType(), reg, left, right));
                     return reg;
                 case PLUS:
-                    reg = new LLVMRegister(new IntType());
+                    reg = new ARMRegister(new IntType());
                     curBlock.addInstruction(
-                            new LLVMArithmetic(LLVMArithmetic.Operator.ADD, new IntType(), reg, left, right));
+                            new ARMArithmetic(ARMArithmetic.Operator.ADD, new IntType(), reg, left, right));
                     return reg;
                 case MINUS:
-                    reg = new LLVMRegister(new IntType());
+                    reg = new ARMRegister(new IntType());
                     curBlock.addInstruction(
-                            new LLVMArithmetic(LLVMArithmetic.Operator.SUB, new IntType(), reg, left, right));
+                            new ARMArithmetic(ARMArithmetic.Operator.SUB, new IntType(), reg, left, right));
                     return reg;
                 case LT:
-                    reg = new LLVMRegister(new BoolType());
+                    reg = new ARMRegister(new BoolType());
                     curBlock.addInstruction(
-                            new LLVMComparison(LLVMComparison.Operator.LT, left.getType(), reg, left, right));
+                            new ARMComparison(ARMComparison.Operator.LT, left.getType(), reg, left, right));
                     return reg;
                 case GT:
-                    reg = new LLVMRegister(new BoolType());
+                    reg = new ARMRegister(new BoolType());
                     curBlock.addInstruction(
-                            new LLVMComparison(LLVMComparison.Operator.GT, left.getType(), reg, left, right));
+                            new ARMComparison(ARMComparison.Operator.GT, left.getType(), reg, left, right));
                     return reg;
                 case LE:
-                    reg = new LLVMRegister(new BoolType());
+                    reg = new ARMRegister(new BoolType());
                     curBlock.addInstruction(
-                            new LLVMComparison(LLVMComparison.Operator.LE, left.getType(), reg, left, right));
+                            new ARMComparison(ARMComparison.Operator.LE, left.getType(), reg, left, right));
                     return reg;
                 case GE:
-                    reg = new LLVMRegister(new BoolType());
+                    reg = new ARMRegister(new BoolType());
                     curBlock.addInstruction(
-                            new LLVMComparison(LLVMComparison.Operator.GE, left.getType(), reg, left, right));
+                            new ARMComparison(ARMComparison.Operator.GE, left.getType(), reg, left, right));
                     return reg;
                 case EQ:
-                    reg = new LLVMRegister(new BoolType());
+                    reg = new ARMRegister(new BoolType());
                     curBlock.addInstruction(
-                            new LLVMComparison(LLVMComparison.Operator.EQ, left.getType(), reg, left, right));
+                            new ARMComparison(ARMComparison.Operator.EQ, left.getType(), reg, left, right));
                     return reg;
                 case NE:
-                    reg = new LLVMRegister(new BoolType());
+                    reg = new ARMRegister(new BoolType());
                     curBlock.addInstruction(
-                            new LLVMComparison(LLVMComparison.Operator.NE, left.getType(), reg, left, right));
+                            new ARMComparison(ARMComparison.Operator.NE, left.getType(), reg, left, right));
                     return reg;
                 case AND:
-                    reg = new LLVMRegister(new BoolType());
-                    curBlock.addInstruction(new LLVMBoolOp(LLVMBoolOp.Operator.AND, new BoolType(), reg, left, right));
+                    reg = new ARMRegister(new BoolType());
+                    curBlock.addInstruction(new ARMBoolOp(ARMBoolOp.Operator.AND, new BoolType(), reg, left, right));
                     return reg;
                 case OR:
-                    reg = new LLVMRegister(new BoolType());
-                    curBlock.addInstruction(new LLVMBoolOp(LLVMBoolOp.Operator.OR, new BoolType(), reg, left, right));
+                    reg = new ARMRegister(new BoolType());
+                    curBlock.addInstruction(new ARMBoolOp(ARMBoolOp.Operator.OR, new BoolType(), reg, left, right));
                     return reg;
                 default:
                     throw new RuntimeException("Invalid BinaryExpression");
             }
         } else if (expr instanceof DotExpression) {
-            LLVMRegister left = (LLVMRegister) writeExpr(((DotExpression) expr).getLeft(), curBlock, symbolTable,
-                                                         structTable, argTypesByFun);
+            ARMRegister left = (ARMRegister) writeExpr(((DotExpression) expr).getLeft(), curBlock, symbolTable,
+                                                       structTable, argTypesByFun, locals);
             StructType t = (StructType) left.getType();
             Pair<Integer, Type> field = structTable.get(t.getName()).get(((DotExpression) expr).getId());
 
             // %r1 = getelementptr %<struct>* <left>, i1 0, i32 <index>
-            LLVMRegister temp1 = new LLVMRegister(field.getSecond());
-            curBlock.addInstruction(new LLVMLoadField(t, temp1, left, field.getFirst()));
+            ARMRegister temp1 = new ARMRegister(field.getSecond());
+            curBlock.addInstruction(new ARMLoadField(t, temp1, left, field.getFirst()));
             // %r2 = load %<type>* %r1
-            LLVMRegister temp2 = new LLVMRegister(field.getSecond());
-            curBlock.addInstruction(new LLVMLoad(field.getSecond(), temp2, temp1));
+            ARMRegister temp2 = new ARMRegister(field.getSecond());
+            curBlock.addInstruction(new ARMLoad(field.getSecond(), temp2, temp1));
 
             return temp2;
         } else if (expr instanceof UnaryExpression) {
-            Value operand = writeExpr(((UnaryExpression) expr).getOperand(), curBlock, symbolTable, structTable, argTypesByFun);
+            Value operand = writeExpr(((UnaryExpression) expr).getOperand(), curBlock, symbolTable, structTable, argTypesByFun, locals);
             if (UnaryExpression.Operator.NOT.equals(((UnaryExpression) expr).getOperator())) {
-                if (operand instanceof LLVMImmediate) {
-                    return new LLVMImmediate(((LLVMImmediate) operand).getVal() == 1 ? 0 : 1);
+                if (operand instanceof ARMImmediate) {
+                    return new ARMImmediate(((ARMImmediate) operand).getVal() == 1 ? 0 : 1);
                 } else {
-                    LLVMRegister reg = new LLVMRegister(new BoolType());
-                    curBlock.addInstruction(new LLVMBoolOp(LLVMBoolOp.Operator.XOR, new BoolType(), reg, operand,
-                                                           new LLVMImmediate(1)));
+                    ARMRegister reg = new ARMRegister(new BoolType());
+                    curBlock.addInstruction(new ARMBoolOp(ARMBoolOp.Operator.XOR, new BoolType(), reg, operand,
+                                                          new ARMImmediate(1)));
                     return reg;
                 }
             } else if (UnaryExpression.Operator.MINUS.equals(((UnaryExpression) expr).getOperator())) {
-                if (operand instanceof LLVMImmediate) {
-                    return new LLVMImmediate(-((LLVMImmediate) operand).getVal());
+                if (operand instanceof ARMImmediate) {
+                    return new ARMImmediate(-((ARMImmediate) operand).getVal());
                 } else {
-                    LLVMRegister reg = new LLVMRegister(new IntType());
+                    ARMRegister reg = new ARMRegister(new IntType());
                     curBlock.addInstruction(
-                            new LLVMArithmetic(LLVMArithmetic.Operator.SUB, new IntType(), reg, new LLVMImmediate(0),
-                                               operand));
+                            new ARMArithmetic(ARMArithmetic.Operator.SUB, new IntType(), reg, new ARMImmediate(0),
+                                              operand));
                     return reg;
                 }
             }
         } else if (expr instanceof FalseExpression) {
-            return new LLVMImmediate(0);
+            return new ARMImmediate(0);
         } else if (expr instanceof TrueExpression) {
-            return new LLVMImmediate(1);
+            return new ARMImmediate(1);
         } else if (expr instanceof IdentifierExpression) {
             Pair<Type, VariableScope> iden = symbolTable.get(((IdentifierExpression) expr).getId());
             if (VariableScope.GLOBAL == iden.getSecond()) {
-                LLVMRegister result = new LLVMRegister(iden.getFirst());
-                curBlock.addInstruction(
-                        new LLVMLoad(iden.getFirst(),
-                                     result,
-                                     new LLVMRegister(iden.getFirst(), "@" + ((IdentifierExpression) expr).getId())));
+                ARMRegister result = new ARMRegister(iden.getFirst());
+                ARMRegister temp = new ARMRegister(iden.getFirst());
+                curBlock.addInstruction(new ARMLoadGlobal(((IdentifierExpression) expr).getId(), temp));
+                curBlock.addInstruction(new ARMLoad(iden.getFirst(), result, temp));
                 return result;
             } else if (VariableScope.LOCAL == iden.getSecond()) {
-                return curBlock.readVariabe(((IdentifierExpression) expr).getId(), iden.getFirst());
+                return curBlock.readVariable(((IdentifierExpression) expr).getId(), iden.getFirst());
             } else if (VariableScope.PARAM == iden.getSecond()) {
-                return curBlock.readVariabe(((IdentifierExpression) expr).getId(), iden.getFirst());
+                return curBlock.readVariable(((IdentifierExpression) expr).getId(), iden.getFirst());
             }
         } else if (expr instanceof IntegerExpression) {
-            return new LLVMImmediate(Integer.parseInt(((IntegerExpression) expr).getValue()));
+            return new ARMImmediate(Integer.parseInt(((IntegerExpression) expr).getValue()));
         } else if (expr instanceof InvocationExpression) {
             Value[] args = ((InvocationExpression) expr).getArguments().stream()
-                    .map(e -> writeExpr(e, curBlock, symbolTable, structTable, argTypesByFun))
+                    .map(e -> writeExpr(e, curBlock, symbolTable, structTable, argTypesByFun, locals))
                     .toArray(Value[]::new);
             Type retType = symbolTable.get(((InvocationExpression) expr).getName()).getFirst();
-            LLVMRegister result = new LLVMRegister(retType);
-            curBlock.addInstruction(new LLVMInvocation(argTypesByFun.get(((InvocationExpression) expr).getName()), retType, result, ((InvocationExpression) expr).getName(), args));
+            ARMRegister result = new ARMRegister(retType);
+            curBlock.addInstruction(new ARMInvocation(argTypesByFun.get(((InvocationExpression) expr).getName()), retType, result, ((InvocationExpression) expr).getName(), args));
             return result;
         } else if (expr instanceof NewExpression) {
-            LLVMRegister alloced = new LLVMRegister(new PointerType());
+            ARMRegister alloced = new ARMRegister(new PointerType());
             curBlock.addInstruction(
-                    new LLVMMalloc(alloced, 8 * structTable.get(((NewExpression) expr).getId()).keySet().size()));
-            LLVMRegister result = new LLVMRegister(new StructType(0, ((NewExpression) expr).getId()));
-            curBlock.addInstruction(new LLVMBitcast(result, alloced));
-            return result;
+                    new ARMMalloc(alloced, 8 * structTable.get(((NewExpression) expr).getId()).keySet().size()));
+            return alloced;
         } else if (expr instanceof NullExpression) {
-            return LLVMNull.instance();
+            return ARMNull.instance();
         } else if (expr instanceof ReadExpression) {
-            curBlock.addInstruction(new LLVMRead());
-            LLVMRegister result = new LLVMRegister(new IntType());
-            curBlock.addInstruction(new LLVMLoad(result.getType(), result, new LLVMRegister(result.getType(), "@.read_scratch")));
+            curBlock.addInstruction(new ARMRead());
+            ARMRegister result = new ARMRegister(new IntType());
+            curBlock.addInstruction(new ARMLoad(result.getType(), result, new ARMRegister(result.getType(), "@.read_scratch")));
             return result;
         }
         throw new RuntimeException("Invalid Expression");
     }
 
+    private static void fixPhis(BasicBlock startBlock) {
+        Queue<BasicBlock> visited = new ArrayDeque<>();
+        Queue<BasicBlock> toVisit = new ArrayDeque<>();
+        toVisit.add(startBlock);
+        while (!toVisit.isEmpty()) {
+            BasicBlock cur = toVisit.poll();
+            visited.add(cur);
+            for (BasicBlock succ : cur.getSuccessors()) {
+                if (!visited.contains(succ)) {
+                    toVisit.add(succ);
+                }
+            }
+
+            cur.resolvePhis();
+        }
+    }
+
     private static void propogateConstants(BasicBlock startBlock, List<Declaration> params) {
         Map<String, ConstValue> valueByRegister = new HashMap<>();
-        Set<LLVMRegister> ssaWorklist = new HashSet<>();
+        Set<ARMRegister> ssaWorklist = new HashSet<>();
         Map<String, DefUse> defUseMap = generateDefUseMap(startBlock, params, valueByRegister, ssaWorklist);
 
         while (!ssaWorklist.isEmpty()) {
-            LLVMRegister cur = ssaWorklist.toArray(new LLVMRegister[ssaWorklist.size()])[0];
+            ARMRegister cur = ssaWorklist.toArray(new ARMRegister[ssaWorklist.size()])[0];
             ssaWorklist.remove(cur);
             DefUse du = defUseMap.get(cur.toString());
-            for (LLVMInstruction use : du.getUses()) {
-                LLVMRegister reg = use.getDefRegister();
+            for (ARMInstruction use : du.getUses()) {
+                ARMRegister reg = use.getDefRegister();
                 if (reg != null) {
                     ConstValue m = valueByRegister.get(reg.toString());
                     if (m != null && !(m instanceof Bottom)) {
@@ -474,7 +480,7 @@ public class LLVMSSAEmitter {
         }
         for (Map.Entry<String, ConstValue> e : valueByRegister.entrySet()) {
             if (e.getValue() instanceof ConstImm) {
-                for (LLVMInstruction use : defUseMap.get(e.getKey()).getUses()) {
+                for (ARMInstruction use : defUseMap.get(e.getKey()).getUses()) {
                     use.replace(e.getKey(), (ConstImm)e.getValue());
                 }
             }
@@ -482,9 +488,9 @@ public class LLVMSSAEmitter {
     }
 
     private static boolean eliminateUselessCode(BasicBlock block, List<Declaration> params) {
-        Map<LLVMInstruction, BasicBlock> blockByInstruction = new HashMap<>();
+        Map<ARMInstruction, BasicBlock> blockByInstruction = new HashMap<>();
         Map<String, DefUse> defUseMap = new HashMap<>();
-        List<LLVMPhi> phis = new ArrayList<>();
+        List<ARMPhi> phis = new ArrayList<>();
         for (Declaration param : params) {
             defUseMap.put("%" + param.getName(),new DefUse(null));
         }
@@ -500,29 +506,29 @@ public class LLVMSSAEmitter {
                 }
             }
 
-            for (LLVMPhi phi : cur.getPhis()) {
+            for (ARMPhi phi : cur.getPhis()) {
                 blockByInstruction.put(phi, cur);
-                LLVMRegister def = phi.getDefRegister();
+                ARMRegister def = phi.getDefRegister();
                 if (def != null) {
                     defUseMap.put(def.toString(), new DefUse(phi));
                 }
                 phis.add(phi);
             }
-            for (LLVMInstruction inst : cur.getInstructions()) {
+            for (ARMInstruction inst : cur.getInstructions()) {
                 blockByInstruction.put(inst, cur);
-                LLVMRegister def = inst.getDefRegister();
+                ARMRegister def = inst.getDefRegister();
                 if (def != null) {
                     defUseMap.put(def.toString(), new DefUse(inst));
                 }
-                for (LLVMRegister use : inst.getUseRegisters()) {
-                    if (use.toString().charAt(0) != '@') {
+                for (ARMRegister use : inst.getUseRegisters()) {
+                    if (use.toString().charAt(0) != '@' && defUseMap.containsKey(use.toString())) {
                         defUseMap.get(use.toString()).addUse(inst);
                     }
                 }
             }
         }
-        for (LLVMPhi phi : phis) {
-            for (LLVMRegister use : phi.getUseRegisters()) {
+        for (ARMPhi phi : phis) {
+            for (ARMRegister use : phi.getUseRegisters()) {
                 if (use.toString().charAt(0) != '@') {
                     defUseMap.get(use.toString()).addUse(phi);
                 }
@@ -531,7 +537,7 @@ public class LLVMSSAEmitter {
 
         boolean changed = false;
         for (DefUse du : defUseMap.values()) {
-            if (du.getUses().size() == 0 && du.getDefinition() != null && !(du.getDefinition() instanceof LLVMInvocation)) {
+            if (du.getUses().size() == 0 && du.getDefinition() != null && !(du.getDefinition() instanceof ARMInvocation)) {
                 changed = true;
                 blockByInstruction.get(du.getDefinition()).remove(du.getDefinition());
             }
@@ -552,11 +558,11 @@ public class LLVMSSAEmitter {
                 }
             }
 
-            List<LLVMInstruction> insts = cur.getInstructions();
-            LLVMInstruction inst = insts.get(insts.size() - 1);
-            if (inst instanceof LLVMConditionalBranch && ((LLVMConditionalBranch) inst).isTrivial()) {
+            List<ARMInstruction> insts = cur.getInstructions();
+            ARMInstruction inst = insts.get(insts.size() - 1);
+            if (inst instanceof ARMLLVMConditionalBranch && ((ARMLLVMConditionalBranch) inst).isTrivial()) {
                 insts.remove(inst);
-                Pair<LLVMJump, String> info = ((LLVMConditionalBranch) inst).getNewBranchInstAndBadLabel();
+                Pair<ARMJump, String> info = ((ARMLLVMConditionalBranch) inst).getNewBranchInstAndBadLabel();
                 insts.add(info.getFirst());
                 removeBlock(cur, info.getSecond());
                 return true;
@@ -580,7 +586,7 @@ public class LLVMSSAEmitter {
 
             if (cur.getLabel().equals(label)) {
                 cur.removePredecessor(block);
-                for (LLVMPhi phi : cur.getPhis()) {
+                for (ARMPhi phi : cur.getPhis()) {
                     phi.removeLabel(block.getLabel());
                 }
             }
@@ -590,17 +596,17 @@ public class LLVMSSAEmitter {
     private static Map<String, DefUse> generateDefUseMap(BasicBlock startBlock,
                                                          List<Declaration> params,
                                                          Map<String, ConstValue> valueByRegister,
-                                                         Set<LLVMRegister> ssaWorklist) {
+                                                         Set<ARMRegister> ssaWorklist) {
         Map<String, DefUse> defUseMap = new HashMap<>();
         for (Declaration param : params) {
             defUseMap.put("%" + param.getName(),new DefUse(null));
             valueByRegister.put("%" + param.getName(), new Bottom());
-            ssaWorklist.add(new LLVMRegister(param.getType(), "%" + param.getName()));
+            ssaWorklist.add(new ARMRegister(param.getType(), "%" + param.getName()));
         }
         Queue<BasicBlock> visited = new ArrayDeque<>();
         Queue<BasicBlock> toVisit = new ArrayDeque<>();
         toVisit.add(startBlock);
-        List<LLVMPhi> phis = new ArrayList<>();
+        List<ARMPhi> phis = new ArrayList<>();
         while (!toVisit.isEmpty()) {
             BasicBlock cur = toVisit.poll();
             visited.add(cur);
@@ -610,8 +616,8 @@ public class LLVMSSAEmitter {
                 }
             }
 
-            for (LLVMPhi phi : cur.getPhis()) {
-                LLVMRegister def = phi.getDefRegister();
+            for (ARMPhi phi : cur.getPhis()) {
+                ARMRegister def = phi.getDefRegister();
                 if (def != null) {
                     defUseMap.put(def.toString(), new DefUse(phi));
                 }
@@ -622,13 +628,13 @@ public class LLVMSSAEmitter {
                 }
                 valueByRegister.put(phi.getDefRegister().toString(), v);
             }
-            for (LLVMInstruction inst : cur.getInstructions()) {
-                LLVMRegister def = inst.getDefRegister();
+            for (ARMInstruction inst : cur.getInstructions()) {
+                ARMRegister def = inst.getDefRegister();
                 if (def != null) {
                     defUseMap.put(def.toString(), new DefUse(inst));
                 }
-                for (LLVMRegister use : inst.getUseRegisters()) {
-                    if (use.toString().charAt(0) != '@') {
+                for (ARMRegister use : inst.getUseRegisters()) {
+                    if (use.toString().charAt(0) != '@' && defUseMap.containsKey(use.toString())) {
                         defUseMap.get(use.toString()).addUse(inst);
                     }
                 }
@@ -641,8 +647,8 @@ public class LLVMSSAEmitter {
                 }
             }
         }
-        for (LLVMPhi phi : phis) {
-            for (LLVMRegister use : phi.getUseRegisters()) {
+        for (ARMPhi phi : phis) {
+            for (ARMRegister use : phi.getUseRegisters()) {
                 defUseMap.get(use.toString()).addUse(phi);
             }
         }
@@ -685,4 +691,3 @@ public class LLVMSSAEmitter {
         return argTypesByFunName;
     }
 }
-

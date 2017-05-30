@@ -1,10 +1,10 @@
-package cfg.llvm;
+package cfg.arm;
 
 import constprop.Bottom;
 import constprop.ConstImm;
 import constprop.ConstValue;
-import constprop.Top;
 
+import java.io.PrintWriter;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -12,11 +12,11 @@ import java.util.Map;
 /**
  * Created by Brad on 4/22/2017.
  */
-public class LLVMMalloc implements LLVMInstruction {
-    private LLVMRegister result;
+public class ARMMalloc implements ARMInstruction {
+    private ARMRegister result;
     private int bytes;
 
-    public LLVMMalloc(LLVMRegister result, int bytes) {
+    public ARMMalloc(ARMRegister result, int bytes) {
         this.result = result;
         this.bytes = bytes;
     }
@@ -25,13 +25,13 @@ public class LLVMMalloc implements LLVMInstruction {
         return String.format("%s = call i8* @malloc(i64 %d)", result.toString(), bytes);
     }
     @Override
-    public LLVMRegister getDefRegister() {
+    public ARMRegister getDefRegister() {
         return result;
     }
 
     @Override
-    public List<LLVMRegister> getUseRegisters() {
-        List<LLVMRegister> uses = new ArrayList<>();
+    public List<ARMRegister> getUseRegisters() {
+        List<ARMRegister> uses = new ArrayList<>();
         return uses;
     }
 
@@ -44,5 +44,13 @@ public class LLVMMalloc implements LLVMInstruction {
     }
 
     public void replace(String reg, ConstImm value) {
+    }
+
+    public void write(PrintWriter pw) {
+        pw.println("\tpush r0");
+        pw.println("\tmov r0, " + bytes);
+        pw.println("\tbl malloc");
+        pw.println("\tstr " + result.toString() + ", r0");
+        pw.println("\tpop r0");
     }
 }

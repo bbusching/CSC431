@@ -1,4 +1,4 @@
-package cfg.llvm;
+package cfg.arm;
 
 import ast.Type;
 import cfg.Value;
@@ -7,6 +7,7 @@ import constprop.ConstImm;
 import constprop.ConstValue;
 import constprop.Top;
 
+import java.io.PrintWriter;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -14,13 +15,13 @@ import java.util.Map;
 /**
  * Created by Brad on 4/14/2017.
  */
-public class LLVMBoolOp implements LLVMInstruction {
+public class ARMBoolOp implements ARMInstruction {
     private final Operator operator;
     private final Type type;
-    private final LLVMRegister result;
+    private final ARMRegister result;
     private Value op1, op2;
 
-    public LLVMBoolOp(Operator op, Type type, LLVMRegister result, Value op1, Value op2) {
+    public ARMBoolOp(Operator op, Type type, ARMRegister result, Value op1, Value op2) {
         this.operator = op;
         this.type = type;
         this.result = result;
@@ -31,7 +32,7 @@ public class LLVMBoolOp implements LLVMInstruction {
     public enum Operator {
         AND("and"),
         OR("or"),
-        XOR("xor");
+        XOR("eor");
 
         private String name;
         Operator(String name) {
@@ -51,31 +52,31 @@ public class LLVMBoolOp implements LLVMInstruction {
     }
 
     @Override
-    public LLVMRegister getDefRegister() {
+    public ARMRegister getDefRegister() {
         return result;
     }
 
     @Override
-    public List<LLVMRegister> getUseRegisters() {
-        List<LLVMRegister> uses = new ArrayList<>();
-        if (op1 instanceof LLVMRegister) {
-            uses.add((LLVMRegister) op1);
+    public List<ARMRegister> getUseRegisters() {
+        List<ARMRegister> uses = new ArrayList<>();
+        if (op1 instanceof ARMRegister) {
+            uses.add((ARMRegister) op1);
         }
-        if (op2 instanceof LLVMRegister) {
-            uses.add((LLVMRegister) op2);
+        if (op2 instanceof ARMRegister) {
+            uses.add((ARMRegister) op2);
         }
         return uses;
     }
 
     public ConstValue initialize(Map<String, ConstValue> valueByRegister) {
-        if (op1 instanceof LLVMImmediate && op2 instanceof LLVMImmediate) {
+        if (op1 instanceof ARMImmediate && op2 instanceof ARMImmediate) {
             switch (operator) {
                 case AND:
-                    return new ConstImm(((LLVMImmediate) op1).getVal() & ((LLVMImmediate) op2).getVal());
+                    return new ConstImm(((ARMImmediate) op1).getVal() & ((ARMImmediate) op2).getVal());
                 case OR:
-                    return new ConstImm(((LLVMImmediate) op1).getVal() | ((LLVMImmediate) op2).getVal());
+                    return new ConstImm(((ARMImmediate) op1).getVal() | ((ARMImmediate) op2).getVal());
                 case XOR:
-                    return new ConstImm(((LLVMImmediate) op1).getVal() ^ ((LLVMImmediate) op2).getVal());
+                    return new ConstImm(((ARMImmediate) op1).getVal() ^ ((ARMImmediate) op2).getVal());
                 default:
                     throw new RuntimeException("Shouldn't be here");
             }
@@ -87,13 +88,13 @@ public class LLVMBoolOp implements LLVMInstruction {
     public ConstValue evaluate(Map<String, ConstValue> valueByRegister) {
         ConstValue cv1;
         ConstValue cv2;
-        if (op1 instanceof LLVMImmediate) {
-            cv1 = new ConstImm(((LLVMImmediate) op1).getVal());
+        if (op1 instanceof ARMImmediate) {
+            cv1 = new ConstImm(((ARMImmediate) op1).getVal());
         } else {
             cv1 = valueByRegister.get(op1.toString());
         }
-        if (op2 instanceof LLVMImmediate) {
-            cv2 = new ConstImm(((LLVMImmediate) op2).getVal());
+        if (op2 instanceof ARMImmediate) {
+            cv2 = new ConstImm(((ARMImmediate) op2).getVal());
         } else {
             cv2 = valueByRegister.get(op2.toString());
         }
@@ -117,11 +118,21 @@ public class LLVMBoolOp implements LLVMInstruction {
     }
 
     public void replace(String reg, ConstImm value) {
-        if (op1 instanceof LLVMRegister && op1.toString().equals(reg)) {
-            op1 = new LLVMImmediate(value.getVal());
+        if (op1 instanceof ARMRegister && op1.toString().equals(reg)) {
+            op1 = new ARMImmediate(value.getVal());
         }
-        if (op2 instanceof LLVMRegister && op2.toString().equals(reg)) {
-            op2 = new LLVMImmediate(value.getVal());
+        if (op2 instanceof ARMRegister && op2.toString().equals(reg)) {
+            op2 = new ARMImmediate(value.getVal());
         }
+    }
+
+    public void write(PrintWriter pw) {
+        if (op1 instanceof ARMImmediate) {
+            op1 = ((ARMImmediate) op1).writeLoad(pw);
+        }
+        if (op2 instanceof ARMImmediate) {
+            op2 = ((ARMImmediate) op2).writeLoad(pw);
+        }
+        pw.println(String.format("\t%s %s, %s, %s", operator.getName(), result.toString(), op1.toString(), op2.toString()));
     }
 }

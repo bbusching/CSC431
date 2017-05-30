@@ -1,10 +1,11 @@
-package cfg.llvm;
+package cfg.arm;
 
 import ast.Type;
 import constprop.Bottom;
 import constprop.ConstImm;
 import constprop.ConstValue;
 
+import java.io.PrintWriter;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -12,12 +13,12 @@ import java.util.Map;
 /**
  * Created by Brad on 4/20/2017.
  */
-public class LLVMLoad implements LLVMInstruction {
+public class ARMLoad implements ARMInstruction {
     private Type type;
-    private LLVMRegister result;
-    private LLVMRegister op;
+    private ARMRegister result;
+    private ARMRegister op;
 
-    public LLVMLoad(Type type, LLVMRegister result, LLVMRegister op) {
+    public ARMLoad(Type type, ARMRegister result, ARMRegister op) {
         this.type = type;
         this.result = result;
         this.op = op;
@@ -31,13 +32,13 @@ public class LLVMLoad implements LLVMInstruction {
     }
 
     @Override
-    public LLVMRegister getDefRegister() {
+    public ARMRegister getDefRegister() {
         return result;
     }
 
     @Override
-    public List<LLVMRegister> getUseRegisters() {
-        List<LLVMRegister> uses = new ArrayList<>();
+    public List<ARMRegister> getUseRegisters() {
+        List<ARMRegister> uses = new ArrayList<>();
         uses.add(op);
         return uses;
     }
@@ -51,5 +52,9 @@ public class LLVMLoad implements LLVMInstruction {
     }
 
     public void replace(String reg, ConstImm value) {
+    }
+
+    public void write(PrintWriter pw) {
+        pw.println("\tldr " + result.toString() + ", " + op.toString());
     }
 }

@@ -1,8 +1,9 @@
-package cfg.llvm;
+package cfg.arm;
 
 import constprop.ConstImm;
 import constprop.ConstValue;
 
+import java.io.PrintWriter;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -10,10 +11,10 @@ import java.util.Map;
 /**
  * Created by Brad on 4/22/2017.
  */
-public class LLVMFree implements LLVMInstruction {
-    private LLVMRegister register;
+public class ARMFree implements ARMInstruction {
+    private ARMRegister register;
 
-    public LLVMFree(LLVMRegister register) {
+    public ARMFree(ARMRegister register) {
         this.register = register;
     }
 
@@ -22,15 +23,15 @@ public class LLVMFree implements LLVMInstruction {
     }
 
     @Override
-    public LLVMRegister getDefRegister() {
+    public ARMRegister getDefRegister() {
         return null;
     }
 
     @Override
-    public List<LLVMRegister> getUseRegisters() {
-        List<LLVMRegister> uses = new ArrayList<>();
-        if (register instanceof LLVMRegister) {
-            uses.add((LLVMRegister) register);
+    public List<ARMRegister> getUseRegisters() {
+        List<ARMRegister> uses = new ArrayList<>();
+        if (register instanceof ARMRegister) {
+            uses.add((ARMRegister) register);
         }
         return uses;
     }
@@ -44,4 +45,11 @@ public class LLVMFree implements LLVMInstruction {
     }
 
     public void replace(String reg, ConstImm value) {}
+
+    public void write(PrintWriter pw) {
+        pw.println("\tpush r0");
+        pw.println("\tmov r0, " + register.toString());
+        pw.println("\tbl free");
+        pw.println("\tpop r0");
+    }
 }

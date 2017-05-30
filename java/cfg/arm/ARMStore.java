@@ -1,10 +1,11 @@
-package cfg.llvm;
+package cfg.arm;
 
 import ast.Type;
 import cfg.Value;
 import constprop.ConstImm;
 import constprop.ConstValue;
 
+import java.io.PrintWriter;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -12,12 +13,12 @@ import java.util.Map;
 /**
  * Created by Brad on 4/20/2017.
  */
-public class LLVMStore implements LLVMInstruction {
+public class ARMStore implements ARMInstruction {
     private Type type;
     private Value val;
-    private LLVMRegister pointer;
+    private ARMRegister pointer;
 
-    public LLVMStore(Type type, Value val, LLVMRegister pointer) {
+    public ARMStore(Type type, Value val, ARMRegister pointer) {
         this.type = type;
         this.val = val;
         this.pointer = pointer;
@@ -31,16 +32,16 @@ public class LLVMStore implements LLVMInstruction {
                              pointer.toString());
     }
     @Override
-    public LLVMRegister getDefRegister() {
+    public ARMRegister getDefRegister() {
         return null;
     }
 
     @Override
-    public List<LLVMRegister> getUseRegisters() {
-        List<LLVMRegister> uses = new ArrayList<>();
+    public List<ARMRegister> getUseRegisters() {
+        List<ARMRegister> uses = new ArrayList<>();
         uses.add(pointer);
-        if (val instanceof LLVMRegister) {
-            uses.add((LLVMRegister) val);
+        if (val instanceof ARMRegister) {
+            uses.add((ARMRegister) val);
         }
         return uses;
     }
@@ -55,6 +56,13 @@ public class LLVMStore implements LLVMInstruction {
     }
 
     public void replace(String reg, ConstImm value) {
-        val = new LLVMImmediate(value.getVal());
+        val = new ARMImmediate(value.getVal());
+    }
+
+    public void write(PrintWriter pw) {
+        if (val instanceof ARMImmediate) {
+            val = ((ARMImmediate) val).writeLoad(pw);
+        }
+        pw.println("\tstr " + val.toString() + ", [" + pointer.toString() + "]");
     }
 }

@@ -1,28 +1,28 @@
 package cfg;
 
-import cfg.llvm.LLVMInstruction;
+import cfg.arm.ARMInstruction;
 
 import java.util.ArrayList;
 import java.util.List;
 
 public class DefUse {
-    LLVMInstruction definition;
-    List<LLVMInstruction> uses;
+    ARMInstruction definition;
+    List<ARMInstruction> uses;
 
-    public DefUse(LLVMInstruction definition) {
+    public DefUse(ARMInstruction definition) {
         this.definition = definition;
         uses = new ArrayList<>();
     }
 
-    public LLVMInstruction getDefinition() {
+    public ARMInstruction getDefinition() {
         return definition;
     }
 
-    public void addUse(LLVMInstruction inst) {
+    public void addUse(ARMInstruction inst) {
         this.uses.add(inst);
     }
 
-    public List<LLVMInstruction> getUses() {
+    public List<ARMInstruction> getUses() {
         return this.uses;
     }
 }

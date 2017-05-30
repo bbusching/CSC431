@@ -1,4 +1,4 @@
-package cfg.llvm;
+package cfg.arm;
 
 import ast.StructType;
 import ast.Type;
@@ -7,14 +7,14 @@ import cfg.Value;
 /**
  * Created by Brad on 4/20/2017.
  */
-public class LLVMNull implements Value {
+public class ARMNull implements Value {
     private static final Type t = new StructType(0, "");
-    private static final LLVMNull instance = new LLVMNull();
+    private static final ARMNull instance = new ARMNull();
 
-    private LLVMNull() {
+    private ARMNull() {
     }
 
-    public static LLVMNull instance() {
+    public static ARMNull instance() {
         return instance;
     }
 
@@ -23,6 +23,6 @@ public class LLVMNull implements Value {
     }
 
     public String toString() {
-        return "null";
+        return "0";
     }
 }

@@ -1,10 +1,10 @@
-package cfg.llvm;
+package cfg.arm;
 
-import cfg.Pair;
 import cfg.Value;
 import constprop.ConstImm;
 import constprop.ConstValue;
 
+import java.io.PrintWriter;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -12,11 +12,11 @@ import java.util.Map;
 /**
  * Created by Brad on 4/22/2017.
  */
-public class LLVMPrint implements LLVMInstruction {
+public class ARMPrint implements ARMInstruction {
    private String format;
    private Value value;
 
-   public LLVMPrint(String format, Value value) {
+   public ARMPrint(String format, Value value) {
       this.format = format;
       this.value = value;
    }
@@ -27,15 +27,15 @@ public class LLVMPrint implements LLVMInstruction {
    }
 
    @Override
-   public LLVMRegister getDefRegister() {
+   public ARMRegister getDefRegister() {
       return null;
    }
 
    @Override
-   public List<LLVMRegister> getUseRegisters() {
-      List<LLVMRegister> uses = new ArrayList<>();
-      if (value instanceof LLVMRegister) {
-         uses.add((LLVMRegister) value);
+   public List<ARMRegister> getUseRegisters() {
+      List<ARMRegister> uses = new ArrayList<>();
+      if (value instanceof ARMRegister) {
+         uses.add((ARMRegister) value);
       }
       return uses;
    }
@@ -50,6 +50,18 @@ public class LLVMPrint implements LLVMInstruction {
    }
 
    public void replace(String reg, ConstImm value) {
-      this.value = new LLVMImmediate(value.getVal());
+      this.value = new ARMImmediate(value.getVal());
+   }
+
+   public void write(PrintWriter pw) {
+      pw.println("\tpush {r0, r1}");
+      pw.println("\tmovw r0, #:lower16:" + format);
+      pw.println("\tmovt r0, #:upper16:" + format);
+      if (value instanceof ARMImmediate) {
+         value = ((ARMImmediate) value).writeLoad(pw);
+      }
+      pw.println("\tmov r1, " + value.toString());
+      pw.println("\tbl printf");
+      pw.println("\tpop {r0, r1}");
    }
 }

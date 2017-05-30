@@ -1,5 +1,4 @@
-import cfg.LLVMEmitter;
-import cfg.LLVMSSAEmitter;
+import cfg.ARMEmitter;
 import org.antlr.v4.runtime.*;
 import org.antlr.v4.runtime.tree.*;
 
@@ -8,7 +7,7 @@ import java.io.*;
 public class MiniCompiler {
 
     private static String _inputFile = null;
-    private static boolean llvm = false;
+    private static boolean arm = false;
     private static boolean ssa = false;
     private static boolean sccp = false;
     private static boolean uce = false;
@@ -29,15 +28,11 @@ public class MiniCompiler {
                     new MiniToAstProgramVisitor();
             ast.Program program = programVisitor.visit(tree);
             TypeChecker.checkSemantics(program);
-            if (llvm) {
+            if (arm) {
                 String filename = _inputFile.lastIndexOf('.') >= 0 ?
-                        String.format("%s.ll", _inputFile.substring(0, _inputFile.lastIndexOf('.')))
-                        : String.format("%s.ll", _inputFile);
-                if (ssa) {
-                    LLVMSSAEmitter.writeLlvm(program, filename, sccp, uce);
-                } else {
-                    LLVMEmitter.writeLlvm(program, filename);
-                }
+                        String.format("%s.s", _inputFile.substring(0, _inputFile.lastIndexOf('.')))
+                        : String.format("%s.s", _inputFile);
+                ARMEmitter.writeLlvm(program, filename, sccp, uce);
             }
         }
     }
@@ -45,8 +40,8 @@ public class MiniCompiler {
     private static void parseParameters(String[] args) {
         for (int i = 0; i < args.length; i++) {
             if (args[i].charAt(0) == '-') {
-                if ("llvm".equals(args[i].substring(1))) {
-                    llvm = true;
+                if ("arm".equals(args[i].substring(1))) {
+                    arm = true;
                 } else if ("ssa".equals(args[i].substring(1))) {
                     ssa = true;
                 } else if ("sccp".equals(args[i].substring(1))) {

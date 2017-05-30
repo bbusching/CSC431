@@ -1,29 +1,35 @@
-package cfg.llvm;
+package cfg.arm;
 
-import constprop.Bottom;
 import constprop.ConstImm;
 import constprop.ConstValue;
 
+import java.io.PrintWriter;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
 /**
- * Created by Brad on 4/22/2017.
+ * Created by Brad on 4/20/2017.
  */
-public class LLVMRead implements LLVMInstruction {
+public class ARMJump implements ARMInstruction {
+    private String label;
+
+    public ARMJump(String label) {
+        this.label = label;
+    }
+
     public String toString() {
-        return "call i32 (i8*, ...)* @scanf(i8* getelementptr inbounds ([4 x i8]* @.read, i32 0, i32 0), i64* @.read_scratch)";
+        return String.format("br label %%%s", label);
     }
 
     @Override
-    public LLVMRegister getDefRegister() {
+    public ARMRegister getDefRegister() {
         return null;
     }
 
     @Override
-    public List<LLVMRegister> getUseRegisters() {
-        List<LLVMRegister> uses = new ArrayList<>();
+    public List<ARMRegister> getUseRegisters() {
+        List<ARMRegister> uses = new ArrayList<>();
         return uses;
     }
 
@@ -36,5 +42,9 @@ public class LLVMRead implements LLVMInstruction {
     }
 
     public void replace(String reg, ConstImm value) {
+    }
+
+    public void write(PrintWriter pw) {
+        pw.println("\tbl " + label);
     }
 }

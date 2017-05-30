@@ -4,7 +4,7 @@ import ast.BoolType;
 import ast.IntType;
 import ast.StructType;
 import ast.Type;
-import cfg.llvm.*;
+import cfg.arm.*;
 
 import java.io.PrintWriter;
 import java.util.*;
@@ -17,19 +17,19 @@ public class BasicBlock {
     private Map<String, Value> valueByIdentifier = new HashMap<>();
     private List<BasicBlock> predecessors = new ArrayList<>();
     private List<BasicBlock> successors = new ArrayList<>();
-    private List<LLVMPhi> phis = new ArrayList<>();
-    private List<LLVMInstruction> instructions = new ArrayList<>();
+    private List<ARMPhi> phis = new ArrayList<>();
+    private List<ARMInstruction> instructions = new ArrayList<>();
 
-    public List<LLVMInstruction> getInstructions() {
+    public List<ARMInstruction> getInstructions() {
         return instructions;
     }
 
-    public List<LLVMPhi> getPhis() {
+    public List<ARMPhi> getPhis() {
         return phis;
     }
 
     public BasicBlock() {
-        this.label = "L" + num++;
+        this.label = ".L" + num++;
     }
 
     public String getLabel() {
@@ -40,14 +40,17 @@ public class BasicBlock {
         this.executable = executable;
     }
 
-    public void addInstruction(LLVMInstruction inst) {
+    public void addInstruction(ARMInstruction inst) {
         this.instructions.add(inst);
     }
 
-    public void addInstructionToFront(LLVMInstruction inst) {
+    public void addInstructionToFront(ARMInstruction inst) {
         this.instructions.add(0, inst);
     }
 
+    public void addPhiMov(ARMMov mov) {
+        this.instructions.add(this.instructions.size() - 2, mov);
+    }
     public void addPredecessor(BasicBlock bb) {
         this.predecessors.add(bb);
     }
@@ -68,7 +71,7 @@ public class BasicBlock {
         this.valueByIdentifier.put(id, val);
     }
 
-    public Value readVariabe(String id, Type t) {
+    public Value readVariable(String id, Type t) {
         if (valueByIdentifier.containsKey(id)) {
             return valueByIdentifier.get(id);
         } else {
@@ -78,28 +81,28 @@ public class BasicBlock {
 
     private Value readVariabeFromPredecessors(String id, Type t) {
         if (!sealed) {
-            LLVMRegister result = new LLVMRegister(t);
-            this.phis.add(new LLVMPhi(id, result));
+            ARMRegister result = new ARMRegister(t);
+            this.phis.add(new ARMPhi(id, result));
             writeVariable(id, result);
             return result;
         } else if (predecessors.size() == 0) {
             if (t instanceof BoolType || t instanceof IntType) {
-                Value result = new LLVMImmediate(0);
+                Value result = new ARMImmediate(0);
                 writeVariable(id, result);
                 return result;
             } else if (t instanceof StructType) {
-                writeVariable(id, LLVMNull.instance());
-                return LLVMNull.instance();
+                writeVariable(id, ARMNull.instance());
+                return ARMNull.instance();
             } else {
                 throw new RuntimeException("Should not be here");
             }
         } else if (predecessors.size() == 1) {
-            Value result = predecessors.get(0).readVariabe(id, t);
+            Value result = predecessors.get(0).readVariable(id, t);
             writeVariable(id, result);
             return result;
         } else {
-            LLVMRegister result = new LLVMRegister(t);
-            LLVMPhi newphi = new LLVMPhi(id, result);
+            ARMRegister result = new ARMRegister(t);
+            ARMPhi newphi = new ARMPhi(id, result);
             this.phis.add(newphi);
             writeVariable(id, result);
             addPhiOperands(id, t, newphi);
@@ -107,14 +110,14 @@ public class BasicBlock {
         }
     }
 
-    private void addPhiOperands(String var, Type t, LLVMPhi phi) {
+    private void addPhiOperands(String var, Type t, ARMPhi phi) {
         for (BasicBlock pred : predecessors) {
-            phi.addOperand(new Pair<>(pred.readVariabe(var, t), pred.getLabel()));
+            phi.addOperand(new Pair<>(pred.readVariable(var, t), pred.getLabel()));
         }
     }
     public void seal() {
         this.sealed = true;
-        for (LLVMPhi phi : phis) {
+        for (ARMPhi phi : phis) {
             addPhiOperands(phi.getIdentifier(), phi.getResult().getType(), phi);
         }
     }
@@ -125,17 +128,14 @@ public class BasicBlock {
 
     public void writeBlock(PrintWriter pw) {
         if (executable) {
-            pw.println(String.format("%s:", this.label));
-            for (LLVMPhi phi : phis) {
-                pw.println(String.format("  %s", phi.toString()));
-            }
-            for (LLVMInstruction inst : this.instructions) {
-                pw.println(String.format("  %s", inst.toString()));
+            pw.println(label + ":");
+            for (ARMInstruction inst : this.instructions) {
+                inst.write(pw);
             }
         }
     }
 
-    public void remove(LLVMInstruction inst) {
+    public void remove(ARMInstruction inst) {
         phis.remove(inst);
         instructions.remove(inst);
     }
@@ -160,8 +160,21 @@ public class BasicBlock {
                     }
                 }
 
-                for (LLVMPhi phi : cur.getPhis()) {
+                for (ARMPhi phi : cur.getPhis()) {
                     phi.removeLabel(this.label);
+                }
+            }
+        }
+    }
+
+    public void resolvePhis() {
+        for (ARMPhi phi : phis) {
+            ARMRegister temp = new ARMRegister(null);
+            for (BasicBlock pred : predecessors) {
+                for (Pair<Value, String> operand : phi.getOperands()) {
+                    if (operand.getSecond().equals(pred.getLabel())) {
+                        pred.addPhiMov(new ARMMov(operand.getFirst(), phi.getDefRegister()));
+                    }
                 }
             }
         }

@@ -1,4 +1,4 @@
-package cfg.llvm;
+package cfg.arm;
 
 import ast.Type;
 import cfg.Value;
@@ -6,16 +6,16 @@ import cfg.Value;
 /**
  * Created by Brad on 4/14/2017.
  */
-public class LLVMRegister implements Value {
+public class ARMRegister implements Value {
     private static int number = 0;
     private final Type t;
     private final String name;
 
-    public LLVMRegister(Type t) {
-        this(t, "%r" + number++);
+    public ARMRegister(Type t) {
+        this(t, "v" + number++);
     }
 
-    public LLVMRegister(Type t, String name) {
+    public ARMRegister(Type t, String name) {
         this.t = t;
         this.name = name;
     }

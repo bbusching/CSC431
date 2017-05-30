@@ -1,4 +1,4 @@
-package cfg.llvm;
+package cfg.arm;
 
 import ast.Type;
 import ast.VoidType;
@@ -7,6 +7,7 @@ import constprop.Bottom;
 import constprop.ConstImm;
 import constprop.ConstValue;
 
+import java.io.PrintWriter;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -14,14 +15,14 @@ import java.util.Map;
 /**
  * Created by Brad on 4/20/2017.
  */
-public class LLVMInvocation implements LLVMInstruction {
+public class ARMInvocation implements ARMInstruction {
     private List<Type> argTypes;
     private Type type;
-    private LLVMRegister result;
+    private ARMRegister result;
     private String function;
     private Value[] args;
 
-    public LLVMInvocation(List<Type> argTypes, Type type, LLVMRegister result, String function, Value... args) {
+    public ARMInvocation(List<Type> argTypes, Type type, ARMRegister result, String function, Value... args) {
         this.argTypes = argTypes;
         this.type = type;
         this.result = result;
@@ -48,16 +49,16 @@ public class LLVMInvocation implements LLVMInstruction {
     }
 
     @Override
-    public LLVMRegister getDefRegister() {
+    public ARMRegister getDefRegister() {
         return result;
     }
 
     @Override
-    public List<LLVMRegister> getUseRegisters() {
-        List<LLVMRegister> uses = new ArrayList<>();
+    public List<ARMRegister> getUseRegisters() {
+        List<ARMRegister> uses = new ArrayList<>();
         for (Value arg : args) {
-            if (arg instanceof LLVMRegister) {
-                uses.add((LLVMRegister) arg);
+            if (arg instanceof ARMRegister) {
+                uses.add((ARMRegister) arg);
             }
         }
         return uses;
@@ -73,9 +74,27 @@ public class LLVMInvocation implements LLVMInstruction {
 
     public void replace(String reg, ConstImm value) {
         for (int i = 0; i < args.length; ++i) {
-            if (args[i] instanceof LLVMRegister && args[i].toString().equals(reg)) {
-                args[i] = new LLVMImmediate(value.getVal());
+            if (args[i] instanceof ARMRegister && args[i].toString().equals(reg)) {
+                args[i] = new ARMImmediate(value.getVal());
             }
         }
+    }
+
+    public void write(PrintWriter pw) {
+        pw.println("\t push {r0 - r3}");
+        for (int i = 0; i < args.length && i < 4; ++i) {
+            if (args[i] instanceof ARMImmediate) {
+                args[i] = ((ARMImmediate) args[i]).writeLoad(pw);
+            }
+            pw.println("\tmov r" + i + ", " + args[i].toString());
+        }
+        for (int i = args.length; i > 3; --i) {
+            if (args[i] instanceof ARMImmediate) {
+                args[i] = ((ARMImmediate) args[i]).writeLoad(pw);
+            }
+            pw.println("\tpush " + args[i]);
+        }
+        pw.println("\tmov " + result.toString() + ", r0");
+        pw.println("\tpop {r0 - r3}");
     }
 }
