@@ -55,6 +55,6 @@ public class ARMLoad implements ARMInstruction {
     }
 
     public void write(PrintWriter pw) {
-        pw.println("\tldr " + result.toString() + ", " + op.toString());
+        pw.println("\tldr " + result.toString() + ", [" + op.toString() + "]");
     }
 }

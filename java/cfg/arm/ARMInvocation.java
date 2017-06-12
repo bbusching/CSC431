@@ -94,6 +94,7 @@ public class ARMInvocation implements ARMInstruction {
             }
             pw.println("\tpush " + args[i]);
         }
+        pw.println("\tbl " + function);
         pw.println("\tmov " + result.toString() + ", r0");
         pw.println("\tpop {r0 - r3}");
     }

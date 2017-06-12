@@ -164,16 +164,18 @@ public class ARMComparison implements ARMInstruction {
                 pw.println(String.format("\tmovge %s, 1", result.toString()));
                 return;
             case GT:
-                pw.println(String.format("\tcmp %s, %s", op2.toString(), op1.toString()));
-                pw.println(String.format("\tmovlt %s, 1", result.toString()));
+                pw.println(String.format("\tadd %s, %s, #1", op2.toString(), op2.toString()));
+                pw.println(String.format("\tcmp %s, %s", op1.toString(), op2.toString()));
+                pw.println(String.format("\tmovge %s, 1", result.toString()));
                 return;
             case LT:
                 pw.println(String.format("\tcmp %s, %s", op1.toString(), op2.toString()));
                 pw.println(String.format("\tmovlt %s, 1", result.toString()));
                 return;
             case LE:
-                pw.println(String.format("\tcmp %s, %s", op2.toString(), op1.toString()));
-                pw.println(String.format("\tmovge %s, 1", result.toString()));
+                pw.println(String.format("\tadd %s, %s, #1", op2.toString(), op2.toString()));
+                pw.println(String.format("\tcmp %s, %s", op1.toString(), op2.toString()));
+                pw.println(String.format("\tmovlt %s, 1", result.toString()));
                 return;
         }
     }

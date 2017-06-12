@@ -1,5 +1,7 @@
 package cfg.arm;
 
+import ast.Type;
+import cfg.Value;
 import constprop.Bottom;
 import constprop.ConstImm;
 import constprop.ConstValue;
@@ -10,33 +12,37 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Created by Brad on 4/22/2017.
+ * Created by Brad on 4/20/2017.
  */
-public class ARMMalloc implements ARMInstruction {
-    private ARMRegister result;
-    private int bytes;
+public class ARMStoreField implements ARMInstruction {
+    private Value val;
+    private ARMRegister ptr;
+    private int index;
 
-    public ARMMalloc(ARMRegister result, int bytes) {
-        this.result = result;
-        this.bytes = bytes;
+    public ARMStoreField(Value result, ARMRegister ptr, int index) {
+        this.val = result;
+        this.ptr = ptr;
+        this.index = index;
     }
 
     public String toString() {
-        return String.format("%s = call i8* @malloc(i64 %d)", result.toString(), bytes);
+        return "";
     }
+
     @Override
     public ARMRegister getDefRegister() {
-        return result;
+        return null;
     }
 
     @Override
     public List<ARMRegister> getUseRegisters() {
         List<ARMRegister> uses = new ArrayList<>();
+        uses.add(ptr);
         return uses;
     }
 
     public ConstValue initialize(Map<String, ConstValue> valueByRegister) {
-        return new Bottom();
+        return null;
     }
 
     public ConstValue evaluate(Map<String, ConstValue> valueByRegister) {
@@ -47,10 +53,10 @@ public class ARMMalloc implements ARMInstruction {
     }
 
     public void write(PrintWriter pw) {
-        pw.println("\tpush r0");
-        pw.println("\tmov r0, " + bytes);
-        pw.println("\tbl malloc");
-        pw.println("\tmov " + result.toString() + ", r0");
-        pw.println("\tpop r0");
+        if (val instanceof ARMImmediate) {
+            val = ((ARMImmediate) val).writeLoad(pw);
+        }
+        pw.println("\tstr " + val.toString() + ", [" + ptr.toString() + ", #" + index * 4 + "]");
     }
 }
+

@@ -118,7 +118,7 @@ public class ARMEmitter {
             if (i < 4) {
                 pw.println("\tmov %" + f.getParams().get(i).getName() + ", r" + i);
             } else {
-                pw.println("\tldr %" + f.getParams().get(i).getName() + ", [fp, #" + (4 + i * 4) + "]");
+                pw.println("\tldr %" + f.getParams().get(i).getName() + ", [fp, #" + (4 + (i - 4) * 4) + "]");
             }
         }
         Set<BasicBlock> visited = new HashSet<>();
@@ -173,9 +173,7 @@ public class ARMEmitter {
                                                            structTable, argTypesByFun, locals);
                 StructType structType = (StructType) left.getType();
                 Pair<Integer, Type> field = structTable.get(structType.getName()).get(((LvalueDot) lval).getId());
-                ARMRegister result = new ARMRegister(field.getSecond());
-                currentBlock.addInstruction(new ARMLoadField(structType, result, left, field.getFirst()));
-                currentBlock.addInstruction(new ARMStore(result.getType(), source, result));
+                currentBlock.addInstruction(new ARMStoreField(source, left, field.getFirst()));
             }
             return currentBlock;
         } else if (stmt instanceof BlockStatement) {
@@ -423,9 +421,9 @@ public class ARMEmitter {
             curBlock.addInstruction(new ARMInvocation(argTypesByFun.get(((InvocationExpression) expr).getName()), retType, result, ((InvocationExpression) expr).getName(), args));
             return result;
         } else if (expr instanceof NewExpression) {
-            ARMRegister alloced = new ARMRegister(new PointerType());
+            ARMRegister alloced = new ARMRegister(new StructType(0, ((NewExpression) expr).getId()));
             curBlock.addInstruction(
-                    new ARMMalloc(alloced, 8 * structTable.get(((NewExpression) expr).getId()).keySet().size()));
+                    new ARMMalloc(alloced, 4 * structTable.get(((NewExpression) expr).getId()).keySet().size()));
             return alloced;
         } else if (expr instanceof NullExpression) {
             return ARMNull.instance();

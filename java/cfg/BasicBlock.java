@@ -49,7 +49,7 @@ public class BasicBlock {
     }
 
     public void addPhiMov(ARMMov mov) {
-        this.instructions.add(this.instructions.size() - 2, mov);
+        this.instructions.add(this.instructions.size() - 1, mov);
     }
     public void addPredecessor(BasicBlock bb) {
         this.predecessors.add(bb);

@@ -57,8 +57,6 @@ public class ARMLoadField implements ARMInstruction {
     }
 
     public void write(PrintWriter pw) {
-        ARMRegister temp = new ARMRegister(type);
-        pw.println("\tldr " + temp.toString() + ", " + ptr.toString());
-        pw.println("\tldr " + result.toString() + "[" + temp.toString() + ", #" + index * 4 + "]");
+        pw.println("\tldr " + result.toString() + "[" + ptr.toString() + ", #" + index * 4 + "]");
     }
 }

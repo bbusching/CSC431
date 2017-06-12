@@ -41,9 +41,9 @@ public class ARMRead implements ARMInstruction {
     public void write(PrintWriter pw) {
         pw.println("\tpush {r0, r1}");
         pw.println("\tmovw r0, #:lower16:.read");
-        pw.println("\tmovt r0, #:lower16:.read");
+        pw.println("\tmovt r0, #:upper16:.read");
         pw.println("\tmovw r1, #:lower16:.read_scratch");
-        pw.println("\tmovt r1, #:lower16:.read_scratch");
+        pw.println("\tmovt r1, #:upper16:.read_scratch");
         pw.println("\tbl __isoc99_scanf");
         pw.println("\tpop {r0, r1}");
     }
